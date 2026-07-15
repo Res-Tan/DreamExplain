@@ -34,6 +34,15 @@
 - **Disk note**: `/home` is at 98% capacity (5.7T/5.9T used, ~179G free) as of
   2026-07-14 — be mindful of checkpoint/log growth when running new training or
   large diagnostic sweeps (§8).
+- **Run one task at a time — no concurrent multi-task runs, even on separate
+  GPUs.** Verified 2026-07-15 (results.md): running Crafter/Pong/Walker Walk
+  concurrently (one process per GPU, each pinned via `CUDA_VISIBLE_DEVICES` to
+  its own card) gave numerically different results for Crafter than a solo
+  re-run of the exact same (checkpoint, seed, decision point); solo runs are
+  consistent with each other regardless of which GPU or GPU model (RTX A6000
+  vs RTX 6000 Ada — checked separately, not the cause) they land on. Not
+  root-caused (leading guess: GPU-side kernel-selection non-determinism under
+  host contention); the practical rule is to just not run tasks concurrently.
 - **No sync step needed anymore**: since code, `dreamerv3/`, and `models/` are
   all local on `matsutake`, the old rsync/scp pull-back-to-Mac step is gone.
   The explanation method (rollout, masking, search, diagnostic experiments in

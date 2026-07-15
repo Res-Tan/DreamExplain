@@ -133,3 +133,268 @@ the most expensive (more segments end up retained → more evals before greedy s
   the Crafter §8 diagnostic run above used the same checkpoint/config/seed but landed on
   different decision points (different J vectors) — needs investigation before results
   from separate runs can be compared directly.
+
+---
+
+## 2026-07-15
+
+### Decision-point reproducibility — root-caused and fixed
+
+Two independent bugs, both needed fixing before decision points were actually
+reproducible:
+
+1. **Env itself was never seeded.** `rollout.get_decision_point` called
+   `env_fn()` with no seed; Crafter/Atari's env classes accept `seed=` but the
+   pipeline never passed it (`config.env.<suite>.use_seed` defaults to `False`
+   for every suite except `dmlab`), and DMC's env class (`embodied/envs/dmc.py`)
+   didn't accept a `seed` kwarg at all. Fixed: `DMC.__init__` now takes
+   `seed=None` and threads it into `suite.load(domain, task, task_kwargs={'random': seed})`
+   (manip/rodent branches intentionally left unseeded — not used by any
+   checkpoint under `models/` yet); `rollout.py`'s `env_fn` now forwards a
+   `seed` override through to `dm_main.make_env`.
+2. **The deeper bug, only visible once points are sampled from a single
+   already-loaded agent (i.e. real multi-point sampling, not "reload the
+   checkpoint per point"): `embodied/jax/agent.py`'s policy-sampling RNG is
+   keyed off `[config.seed, n_actions counter]`, and `n_actions` is a single
+   instance-wide counter that keeps incrementing across `driver.reset()`
+   calls — it is never per-episode.** A fresh checkpoint load happens to start
+   at counter 0, which is why single-point, reload-per-run usage looked
+   reproducible before; the first version of today's multi-seed sweep (5
+   seeds against one shared agent instance) reproduced this directly — the
+   *same* `(seed=0, step=1)` request gave a different J vector depending on
+   how many earlier seeds/episodes had already been sampled against that
+   agent in-process. Fixed by calling `agent.n_actions.reset()` at the start
+   of every `rollout.sample_decision_points` call, so policy-RNG state always
+   starts fresh regardless of call history.
+
+Both fixes are in `rollout.py` (`sample_decision_points`, new — generalizes
+`get_decision_point` to snapshot multiple step-indices within one seeded
+episode instead of resetting per point) and `dreamerv3/embodied/envs/dmc.py`.
+`pipeline.bootstrap` now defaults to seeded/reproducible sampling via a new
+`decision_point: {seed, warmup_steps}` config section (all four `config*.yaml`
+updated; `seed: null` there falls back to the top-level `seed`).
+
+Verified for all three tasks (`experiments/sample_decision_points.py`,
+identical `(seed, step)` sampled twice against the same loaded agent,
+`np.array_equal` on J): **PASS for Crafter, Atari Pong, DMC Walker Walk.**
+
+### Multi-point sampling sweep (`fill=self_mean`, `objective=H_sel`, GPU 0/1/3 in parallel)
+
+5 env seeds × 7 step-indices (1, 5, 10, 15, 20, 25, 30) = 35 decision points
+per task, ranked by candidate `J` range (`max - min`, a proxy for "how
+decisive is this point"). **Numbers below are from a solo re-run per task, not
+the original 3-way-concurrent run — see "Concurrent-run numerical discrepancy"
+below for why.**
+
+| Task | Best point | J range | \|B\| at best point | Max J range seen anywhere |
+|---|---|---|---|---|
+| Crafter | seed=3, step=25 | 5.72 | 2 | 5.72 |
+| Atari Pong | seed=2, step=30 | 0.10 | 1 | 0.10 |
+| DMC Walker Walk | seed=0, step=25 | 18.32 | 0 | 18.32 |
+
+#### Concurrent-run numerical discrepancy (methodological finding, not a pipeline bug)
+
+The sweep was first run with all three tasks launched concurrently (one
+process per GPU, GPU 0/1/3). Spot-checking Crafter's top point afterwards by
+re-running it alone (same config, same seed, same code) gave a **different**
+result: `J range=5.72, |B|=2` solo vs. `J range=4.46, |B|=1` in the concurrent
+run — same divergence pattern across the whole ranking, not just the top row
+(full logs: `experiments/out/crafter_sample_points.log` (concurrent) vs.
+`experiments/out/crafter_sample_points_solo.log` (solo re-run)). Re-running
+Atari Pong and Walker Walk solo, by contrast, reproduced
+their concurrent-run numbers **exactly**, row for row (`experiments/out/
+{atari_pong,dmc_walker_walk}_sample_points_solo.log`). So this is not a
+blanket "concurrency breaks reproducibility" problem — it reproduced only for
+Crafter in this test.
+
+Each task's process was confirmed pinned to exactly one GPU throughout,
+including in the concurrent run (`CUDA_VISIBLE_DEVICES` set per process; log
+confirms `JAX devices (1): [cuda:0]` for Crafter even while running alongside
+the other two) — so this is not one task's computation being split across
+multiple GPUs, it's three single-GPU processes sharing the host at the same
+time. Multiple solo re-runs of Crafter (different GPUs, separate process
+launches) all agreed with each other (5.72 every time), and the
+`agent.n_actions` counter-reset fix above was independently verified working
+in isolation — so this isn't the same bug resurfacing either.
+
+This machine has two GPU models (`nvidia-smi`: GPU 0/1/4 are RTX A6000, GPU
+2/3/5-9 are RTX 6000 Ada) — checked separately as a possible factor. Solo,
+sequential runs of the same (task, seed, step) on an A6000 vs. an Ada card
+gave byte-identical `J` for all three tasks (Crafter: GPU0 vs. GPU2, both
+5.7242; Pong: GPU0 vs. GPU2, `J` arrays identical at both seed=0/step=1 and
+seed=2/step=30; Walker Walk: GPU1 vs. GPU3, identical at seed=0/step=1 and
+matching J range at seed=0/step=25, 18.3246 vs. 18.32465). **GPU model is not
+a source of discrepancy** — the effect is specific to concurrent multi-task
+runs, not architecture.
+
+Leading hypothesis for the concurrent-run effect: GPU-side non-determinism in
+convolution/reduction kernel selection (cuDNN/XLA autotuning can pick a
+different, non-deterministic-reduction algorithm depending on runtime GPU
+load), triggered by Crafter's specific conv shapes under host contention but
+not Atari's or DMC's. **Not fully root-caused**, and not chased further today
+since the qualitative conclusion (Crafter's decision points are clearly
+non-degenerate) holds either way.
+
+**Standing practice going forward: run one task at a time (no concurrent
+multi-task sweeps across GPUs)** — this side-steps the issue entirely
+(verified: every solo run across all three tasks has been consistent) without
+needing the root cause pinned down.
+
+**This changes the 2026-07-14 conclusion for Walker Walk, but not for Pong:**
+
+- **Walker Walk is *not* a degenerate task** — seed=0 alone produced 5 points
+  with J range 7.5–18.3 (steps 1/10/15/20/25), an order of magnitude more
+  separated than anything seen in the earlier arbitrary-frame smoke test
+  (range ~9 at best, most runs ~0.03–0.16). The prior "degenerate decision
+  point" diagnosis was an artifact of sampling only one unreproducible,
+  arbitrary frame. **However, `self_mean` fill still returns `B=∅` at every
+  one of these highly-decisive points** (see table: |B|=0 at the top-5 by J
+  range, including the seed=0/step=25 point with range 18.3). This is the
+  self-leakage failure mode readme.md §3 already flags for `self_mean`
+  ("leaks the trajectory's overall magnitude into the removed region") — for
+  Walker Walk specifically, where a candidate's return is dominated by its
+  average forward velocity across the whole horizon rather than a localized
+  event, `self_mean`'s per-trajectory mean fill apparently reconstructs
+  enough of that magnitude on its own that no real segment is needed to
+  preserve `argmax`. **Practical upshot: Walker Walk needs `global_prior` (or
+  another non-self-referential fill) to produce a meaningful `B` at all** —
+  this is no longer just the "recommended default" from readme.md §3, it's
+  now the load-bearing blocker for getting any real result out of this task.
+- **Pong's low decisiveness is real, not a sampling artifact.** Across all 35
+  points the max J range found was 0.10 (vs. Crafter's 5.72 and Walker Walk's
+  18.3) — consistent with Pong's near-ceiling eval score (§ 2026-07-14 above,
+  20.375/21) meaning most actions from most states are close to equally good.
+  seed=2/step=30 (`|B|=1`, J range 0.10) is the best candidate reference point
+  found so far and is a real, non-trivial (if modest) decision — worth using
+  as Pong's reference point in future runs instead of an arbitrary frame, but
+  don't expect Pong to ever produce Crafter-scale explanations.
+
+### How often does `self_mean` find non-trivial evidence?
+
+Across the same 35 decision points per task, fraction where greedy search
+under `H_sel` + `self_mean` returns a non-empty `B` (i.e. finds any real
+evidence at all, rather than the empty-mask baseline already satisfying the
+objective):
+
+| Task | Non-empty `B` | Share |
+|---|---|---|
+| Crafter | 20/35 | 57% |
+| Atari Pong | 11/35 | 31% |
+| DMC Walker Walk | 8/35 | 23% |
+
+**Conclusion: of the three tasks, `self_mean` is only reliably usable on
+Crafter.** The failure mode differs by task:
+
+- **Walker Walk**: the failure is systematic, not random. The 5 most decisive
+  points by candidate-score separation (J range 7.5–18.3) *all* return
+  `B=∅`; every non-empty `B` found across the sweep comes from a low-separation
+  point (J range < 3.5). I.e. the more clear-cut the decision, the more likely
+  `self_mean` is to (wrongly) report "nothing needed" — consistent with
+  `self_mean`'s known self-leakage failure mode (readme.md §3): masking with a
+  trajectory's own mean partially reconstructs its overall magnitude, which is
+  most of the signal for a task like Walker Walk where return is dominated by
+  sustained average velocity rather than a local event. `global_prior` fill is
+  needed to get a meaningful result on this task.
+- **Atari Pong**: candidate scores are close together at every sampled point
+  (max J range across all 35 points is 0.10, an order of magnitude below the
+  other two tasks) — consistent with the checkpoint's near-ceiling eval score
+  (20.375/21, § 2026-07-14). The low non-empty-`B` rate here most likely
+  reflects genuinely low-stakes decisions rather than a fill-strategy
+  artifact (confirmed below: switching fill changes Pong's non-empty-`B` rate
+  substantially, so `self_mean` isn't the only thing suppressing it).
+- **Crafter**: no systematic relationship between decisiveness and `B` size —
+  high-separation points mostly do return non-empty `B` (e.g. the top point,
+  J range 5.72, returns `|B|=2`).
+
+### Fill × objective grid on the top-5 most decisive points, before implementing `global_prior`
+
+Question: is the `self_mean` failure above specific to that one (fill,
+objective) pair, or does it hold for the other implemented fills (`shuffle`,
+`zero`, reward-only) and the other two objectives (`H_rank`, `H_margin`)?
+Evaluated all 3×3 fill/objective combinations on each task's top-5 most
+decisive points (`experiments/fill_objective_sweep.py`). Cell = % of the 5
+points where greedy search under that (fill, objective) returns a non-empty
+`B`:
+
+**Crafter**
+
+| fill | H_sel | H_rank | H_margin |
+|---|---|---|---|
+| self_mean | 60% | 60% | 100% |
+| shuffle | 40% | 100% | 100% |
+| zero | 40% | 100% | 100% |
+
+**Atari Pong**
+
+| fill | H_sel | H_rank | H_margin |
+|---|---|---|---|
+| self_mean | 20% | 20% | 60% |
+| shuffle | 60% | 100% | 100% |
+| zero | 20% | 20% | 60% |
+
+**DMC Walker Walk**
+
+| fill | H_sel | H_rank | H_margin |
+|---|---|---|---|
+| self_mean | 0% | 0% | 40% |
+| shuffle | 40% | 60% | 100% |
+| zero | 20% | 0% | 80% |
+
+**Conclusions:**
+
+1. **`H_margin` is almost always satisfiable non-trivially** (40–100% across
+   every task/fill combination) — the least likely of the three objectives to
+   trivially collapse to `B=∅`, consistent with readme.md §5's expectation
+   that it's the hardest constraint to satisfy for free.
+2. **`H_sel` is the most fragile** — most often trivially satisfied by
+   `self_mean`/`zero`, worst on Walker Walk (0%) and Pong (20%).
+3. **`shuffle` fill consistently finds more non-trivial evidence than
+   `self_mean`/`zero`, on every task and every objective** — most dramatically
+   on Walker Walk (`H_sel`: 40% vs. 0%/20%; `H_rank`: 60% vs. 0%/0%) and Pong
+   (`H_sel`: 60% vs. 20%/20%). `shuffle` preserves each candidate's actual
+   per-step values but destroys their order, so unlike `self_mean`/`zero` it
+   cannot reconstruct a trajectory's aggregate magnitude for free — direct
+   supporting evidence for the self-leakage explanation above.
+4. **`self_mean` and `zero` behave identically on Pong** (same rates in every
+   cell) — consistent with Pong's reward being sparse/near-zero at most
+   steps, so masking it to zero and masking it to its own mean converge.
+
+**Practical takeaway**: `shuffle` is a free, already-implemented improvement
+over `self_mean` for Walker Walk and Pong, and should be preferred over
+`self_mean` in reporting until `global_prior` is implemented. `global_prior`
+itself is untested here and may behave differently from either.
+
+### Updated recommendation for reference decision points
+
+Use these `(seed, step)` pairs (via `rollout.sample_decision_points` /
+`pipeline.bootstrap_many`) for future single-point diagnostics instead of the
+default `warmup_steps=1`:
+
+| Task | seed | step |
+|---|---|---|
+| Crafter | 3 | 25 |
+| Atari Pong | 2 | 30 |
+| DMC Walker Walk | 0 | 25 |
+
+### Open items (updated)
+
+- ~~Decision-point sampling isn't reproducible run-to-run~~ — **resolved** for
+  solo runs (both root causes fixed and verified for all three tasks). **New,
+  narrower open item**: Crafter (only, not Pong/Walker Walk in this test) gave
+  different J values in a 3-way-concurrent GPU sweep vs. a solo re-run — see
+  "Concurrent-run numerical discrepancy" above. Not root-caused.
+- ~~Pong and Walker Walk's sampled decision point is degenerate~~ — **resolved
+  for Walker Walk** (it isn't degenerate; `self_mean` leakage was masking
+  that). **Still true for Pong**, but now confirmed to be a property of the
+  task/checkpoint rather than a sampling issue.
+- `global_prior` fill needs an offline-rollout precompute step (`config.yaml`
+  `masking.global_prior.rollouts_dir` is empty) — not implemented yet. Raised
+  in priority by the Walker Walk finding above: without it, Walker Walk has no
+  fill strategy that produces a non-trivial `B`, even at its most decisive
+  points.
+- `H_full` and `counterfactual_reimagine` still haven't been exercised by any experiment
+  script.
+- The full §8 diagnostic sweep (sanity check / cross-baseline / cross-objective / cost
+  accounting) hasn't been re-run yet against the new reference points above — the
+  2026-07-14 §8 results were against the old, unreproducible, arbitrary-frame points and
+  should be treated as superseded for Pong/Walker Walk specifically.

@@ -142,88 +142,33 @@ the most expensive (more segments end up retained → more evals before greedy s
 seeded and verified reproducible — the same `(seed, step)` always yields the
 same imagined rollout and `J`, for all three tasks.*
 
-### Multi-point sampling sweep (`fill=self_mean`, `objective=H_sel`, GPU 0/1/3 in parallel)
+### Multi-point sampling sweep (`fill=self_mean`, `objective=H_sel`, 35 points/task)
 
-5 env seeds × 7 step-indices (1, 5, 10, 15, 20, 25, 30) = 35 decision points
-per task, ranked by candidate `J` range (`max - min`, a proxy for "how
-decisive is this point").
+5 env seeds × 7 steps (1/5/10/15/20/25/30) = 35 decision points per task.
+Per point: `J range` = max−min candidate score ("how decisive is this
+point"), and whether greedy search finds any evidence at all (`B` non-empty).
 
-*Tip: numbers can drift slightly (same qualitative conclusion, e.g. Crafter's
-top point measured at 4.46–5.72 depending on run) when several tasks are run
-concurrently on different GPUs at once — run one task at a time if exact
-figures need to match exactly.*
+| Task | Max J range found | Non-empty `B` rate | Reference point |
+|---|---|---|---|
+| Crafter | 5.72 | 20/35 (57%) | seed=3, step=25 |
+| Atari Pong | 0.10 | 11/35 (31%) | seed=2, step=30 |
+| DMC Walker Walk | 18.32 | 8/35 (23%) | seed=0, step=25 |
 
-| Task | Best point | J range | \|B\| at best point | Max J range seen anywhere |
-|---|---|---|---|---|
-| Crafter | seed=3, step=25 | 5.72 | 2 | 5.72 |
-| Atari Pong | seed=2, step=30 | 0.10 | 1 | 0.10 |
-| DMC Walker Walk | seed=0, step=25 | 18.32 | 0 | 18.32 |
+**Conclusions:**
 
-**This changes the 2026-07-14 conclusion for Walker Walk, but not for Pong:**
-
-- **Walker Walk is *not* a degenerate task** — seed=0 alone produced 5 points
-  with J range 7.5–18.3 (steps 1/10/15/20/25), an order of magnitude more
-  separated than anything seen in the earlier arbitrary-frame smoke test
-  (range ~9 at best, most runs ~0.03–0.16). The prior "degenerate decision
-  point" diagnosis was an artifact of sampling only one unreproducible,
-  arbitrary frame. **However, `self_mean` fill still returns `B=∅` at every
-  one of these highly-decisive points** (see table: |B|=0 at the top-5 by J
-  range, including the seed=0/step=25 point with range 18.3). This is the
-  self-leakage failure mode readme.md §3 already flags for `self_mean`
-  ("leaks the trajectory's overall magnitude into the removed region") — for
-  Walker Walk specifically, where a candidate's return is dominated by its
-  average forward velocity across the whole horizon rather than a localized
-  event, `self_mean`'s per-trajectory mean fill apparently reconstructs
-  enough of that magnitude on its own that no real segment is needed to
-  preserve `argmax`. **Practical upshot: Walker Walk needs `global_prior` (or
-  another non-self-referential fill) to produce a meaningful `B` at all** —
-  this is no longer just the "recommended default" from readme.md §3, it's
-  now the load-bearing blocker for getting any real result out of this task.
-- **Pong's low decisiveness is real, not a sampling artifact.** Across all 35
-  points the max J range found was 0.10 (vs. Crafter's 5.72 and Walker Walk's
-  18.3) — consistent with Pong's near-ceiling eval score (§ 2026-07-14 above,
-  20.375/21) meaning most actions from most states are close to equally good.
-  seed=2/step=30 (`|B|=1`, J range 0.10) is the best candidate reference point
-  found so far and is a real, non-trivial (if modest) decision — worth using
-  as Pong's reference point in future runs instead of an arbitrary frame, but
-  don't expect Pong to ever produce Crafter-scale explanations.
-
-### How often does `self_mean` find non-trivial evidence?
-
-Across the same 35 decision points per task, fraction where greedy search
-under `H_sel` + `self_mean` returns a non-empty `B` (i.e. finds any real
-evidence at all, rather than the empty-mask baseline already satisfying the
-objective):
-
-| Task | Non-empty `B` | Share |
-|---|---|---|
-| Crafter | 20/35 | 57% |
-| Atari Pong | 11/35 | 31% |
-| DMC Walker Walk | 8/35 | 23% |
-
-**Conclusion: of the three tasks, `self_mean` is only reliably usable on
-Crafter.** The failure mode differs by task:
-
-- **Walker Walk**: the failure is systematic, not random. The 5 most decisive
-  points by candidate-score separation (J range 7.5–18.3) *all* return
-  `B=∅`; every non-empty `B` found across the sweep comes from a low-separation
-  point (J range < 3.5). I.e. the more clear-cut the decision, the more likely
-  `self_mean` is to (wrongly) report "nothing needed" — consistent with
-  `self_mean`'s known self-leakage failure mode (readme.md §3): masking with a
-  trajectory's own mean partially reconstructs its overall magnitude, which is
-  most of the signal for a task like Walker Walk where return is dominated by
-  sustained average velocity rather than a local event. `global_prior` fill is
-  needed to get a meaningful result on this task.
-- **Atari Pong**: candidate scores are close together at every sampled point
-  (max J range across all 35 points is 0.10, an order of magnitude below the
-  other two tasks) — consistent with the checkpoint's near-ceiling eval score
-  (20.375/21, § 2026-07-14). The low non-empty-`B` rate here most likely
-  reflects genuinely low-stakes decisions rather than a fill-strategy
-  artifact (confirmed below: switching fill changes Pong's non-empty-`B` rate
-  substantially, so `self_mean` isn't the only thing suppressing it).
-- **Crafter**: no systematic relationship between decisiveness and `B` size —
-  high-separation points mostly do return non-empty `B` (e.g. the top point,
-  J range 5.72, returns `|B|=2`).
+- **Walker Walk is not a degenerate task** (J range up to 18.3 — an order of
+  magnitude above the single arbitrary point checked on 2026-07-14), but
+  `self_mean` fails *worse* the more decisive the point: all 5 top points by
+  J range give `B=∅`; every non-empty `B` in the whole sweep comes from a
+  point with J range < 3.5. This is `self_mean`'s self-leakage failure mode
+  (readme.md §3) — masking with a trajectory's own mean reconstructs a
+  sustained, global signal like Walker Walk's average-velocity return, and
+  does so *better* the larger that signal is.
+- **Pong's low decisiveness is real** (max J range 0.10 across all 35
+  points, uniformly small) — consistent with its near-ceiling eval score,
+  not a fill or sampling artifact.
+- **Crafter**: `self_mean` works reasonably well (57%), with no such inverse
+  relationship between decisiveness and `B` size.
 
 ### Fill × objective grid on the top-5 most decisive points, before implementing `global_prior`
 
@@ -352,18 +297,6 @@ default fill for `H_sel`- and `H_margin`-based results, including as the
 fix for Walker Walk's `H_sel` failure (0% under `self_mean` → 80% under
 `global_prior`). For `H_rank` specifically, use `shuffle` instead of
 `global_prior` until the tie-handling issue above is addressed.
-
-### Updated recommendation for reference decision points
-
-Use these `(seed, step)` pairs (via `rollout.sample_decision_points` /
-`pipeline.bootstrap_many`) for future single-point diagnostics instead of the
-default `warmup_steps=1`:
-
-| Task | seed | step |
-|---|---|---|
-| Crafter | 3 | 25 |
-| Atari Pong | 2 | 30 |
-| DMC Walker Walk | 0 | 25 |
 
 ### Open items (updated)
 

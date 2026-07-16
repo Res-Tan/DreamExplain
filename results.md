@@ -364,6 +364,76 @@ over `self_mean` for Walker Walk and Pong, and should be preferred over
 `self_mean` in reporting until `global_prior` is implemented. `global_prior`
 itself is untested here and may behave differently from either.
 
+### `global_prior` fill implemented and evaluated
+
+Closes the readme.md §9 open item. Population-level per-timestep means for
+`{r, u, d}` are estimated from ~1000 samples per imagined timestep (many
+decision points across seeds disjoint from the reference points elsewhere in
+this doc, each contributing its `N=8` imagined candidates;
+`experiments/build_global_prior.py`), saved per task under
+`worldmodel_explain/priors/<task>/prior.npz`, and loaded automatically by
+`pipeline.Decision` whenever `fill='global_prior'`. Re-ran the same top-5 ×
+fill × objective grid as above with `global_prior` added:
+
+**Crafter**
+
+| fill | H_sel | H_rank | H_margin |
+|---|---|---|---|
+| self_mean | 60% | 60% | 100% |
+| shuffle | 60% | 80% | 100% |
+| zero | 40% | 100% | 100% |
+| global_prior | 60% | 0% | 100% |
+
+**Atari Pong**
+
+| fill | H_sel | H_rank | H_margin |
+|---|---|---|---|
+| self_mean | 20% | 20% | 60% |
+| shuffle | 60% | 100% | 100% |
+| zero | 20% | 20% | 60% |
+| global_prior | 100% | 0% | 100% |
+
+**DMC Walker Walk**
+
+| fill | H_sel | H_rank | H_margin |
+|---|---|---|---|
+| self_mean | 0% | 0% | 40% |
+| shuffle | 20% | 40% | 100% |
+| zero | 20% | 0% | 80% |
+| global_prior | 80% | 0% | 100% |
+
+**Conclusions:**
+
+1. **`global_prior` is the strongest fill for `H_sel`, by a wide margin, on
+   every task** — Pong 100% (vs. 20–60% for the others), Walker Walk 80% (vs.
+   0–20%), Crafter 60% (tied for best). This directly fixes the readme.md §3
+   self-leakage failure: unlike `self_mean`, the replacement value for a
+   masked step no longer depends on that trajectory's own magnitude, so it
+   can no longer "leak" the answer for free.
+2. **`global_prior` gives `H_rank = 0%` on every task — but this is a
+   structural artifact of the metric, not evidence the fill is uninformative
+   for ranking.** Verified directly (Crafter, top point): fully masking with
+   `global_prior` (`B=∅`) collapses all 8 candidates' scores to the *same*
+   value (`J̃ = [5.838, 5.838, ..., 5.838]`, since the replacement curve
+   doesn't depend on which candidate it's filling), and `objectives.d_rank`'s
+   Kendall-tau falls back to τ=1 ("ranking preserved") when there are zero
+   concordant/discordant pairs to compare — a defensible tie-break in
+   general, but here it means a fully-collapsed, uninformative ranking gets
+   scored identically to a perfectly-preserved one, so `H_rank(∅)` is always
+   already at its minimum and greedy search never has a reason to add
+   anything back in. This only bites candidate-independent fills; `self_mean`
+   /`shuffle`/`zero` keep some per-candidate structure at `B=∅` and don't hit
+   it. Flagged as a metric limitation worth revisiting (e.g. penalizing total
+   ties instead of defaulting them to "preserved"), not re-derived today.
+3. **`H_margin` is saturated (100%) under `global_prior` on all three
+   tasks**, same pattern as the other fills.
+
+**Practical takeaway**: `global_prior` should replace `self_mean` as the
+default fill for `H_sel`- and `H_margin`-based results, including as the
+fix for Walker Walk's `H_sel` failure (0% under `self_mean` → 80% under
+`global_prior`). For `H_rank` specifically, use `shuffle` instead of
+`global_prior` until the tie-handling issue above is addressed.
+
 ### Updated recommendation for reference decision points
 
 Use these `(seed, step)` pairs (via `rollout.sample_decision_points` /

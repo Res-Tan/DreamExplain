@@ -287,10 +287,28 @@ main sweep. Instead:
 - [x] Whether `û` is per-step or bootstrap-only — resolved: per-step.
 - [x] How `c_i` are generated — resolved: top-N modes (discrete) / N samples
       (continuous); continuation for t=2..T only implements policy-sampling so far.
-- [ ] Source/scale of data for `global_prior` baseline statistics — still open,
-      blocks the `global_prior` fill.
+- [x] Source/scale of data for `global_prior` baseline statistics — resolved
+      2026-07-15: per-timestep population means over ~1000 sampled imagined
+      candidates per task, built by `experiments/build_global_prior.py` and
+      loaded automatically by `pipeline.Decision` (see `results.md`).
 - [x] Definition of "transition strength" for `Rdyn` — resolved: local derivative
       magnitude of `r̂`/`û` (see `objectives.py`).
+- [ ] **`D_rank`'s tie-breaking makes it structurally blind to
+      candidate-independent fills (`global_prior`).** `objectives.d_rank`'s
+      Kendall-tau falls back to τ=1 ("ranking fully preserved") whenever
+      there are zero concordant/discordant pairs to compare. A
+      candidate-independent fill like `global_prior` makes every candidate's
+      masked score identical at `B=∅` (verified: 8 candidates collapse to one
+      value), which trivially hits this zero-pairs case — so `H_rank(∅)` is
+      always already at its minimum for `global_prior`, and greedy search
+      never adds anything back in (0% non-empty `B` across all three tasks,
+      results.md 2026-07-15). This reads as "ranking preserved" when the
+      ranking was actually destroyed entirely. `self_mean`/`shuffle`/`zero`
+      don't hit this (they keep some per-candidate structure at `B=∅`), so
+      it's specific to fills without per-candidate variation. Needs a
+      tie-handling fix (e.g. score total ties as a `D_rank` cost rather than
+      defaulting to 0) before `H_rank` + `global_prior` can be trusted
+      together; until then, use `shuffle` for `H_rank` results.
 
 See `results.md` (same folder) for the experiment-progress log, including open items found
 only once evaluation started (degenerate decision points, decision-point

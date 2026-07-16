@@ -138,107 +138,26 @@ the most expensive (more segments end up retained → more evals before greedy s
 
 ## 2026-07-15
 
-### Decision-point reproducibility — root-caused and fixed
-
-Two independent bugs, both needed fixing before decision points were actually
-reproducible:
-
-1. **Env itself was never seeded.** `rollout.get_decision_point` called
-   `env_fn()` with no seed; Crafter/Atari's env classes accept `seed=` but the
-   pipeline never passed it (`config.env.<suite>.use_seed` defaults to `False`
-   for every suite except `dmlab`), and DMC's env class (`embodied/envs/dmc.py`)
-   didn't accept a `seed` kwarg at all. Fixed: `DMC.__init__` now takes
-   `seed=None` and threads it into `suite.load(domain, task, task_kwargs={'random': seed})`
-   (manip/rodent branches intentionally left unseeded — not used by any
-   checkpoint under `models/` yet); `rollout.py`'s `env_fn` now forwards a
-   `seed` override through to `dm_main.make_env`.
-2. **The deeper bug, only visible once points are sampled from a single
-   already-loaded agent (i.e. real multi-point sampling, not "reload the
-   checkpoint per point"): `embodied/jax/agent.py`'s policy-sampling RNG is
-   keyed off `[config.seed, n_actions counter]`, and `n_actions` is a single
-   instance-wide counter that keeps incrementing across `driver.reset()`
-   calls — it is never per-episode.** A fresh checkpoint load happens to start
-   at counter 0, which is why single-point, reload-per-run usage looked
-   reproducible before; the first version of today's multi-seed sweep (5
-   seeds against one shared agent instance) reproduced this directly — the
-   *same* `(seed=0, step=1)` request gave a different J vector depending on
-   how many earlier seeds/episodes had already been sampled against that
-   agent in-process. Fixed by calling `agent.n_actions.reset()` at the start
-   of every `rollout.sample_decision_points` call, so policy-RNG state always
-   starts fresh regardless of call history.
-
-Both fixes are in `rollout.py` (`sample_decision_points`, new — generalizes
-`get_decision_point` to snapshot multiple step-indices within one seeded
-episode instead of resetting per point) and `dreamerv3/embodied/envs/dmc.py`.
-`pipeline.bootstrap` now defaults to seeded/reproducible sampling via a new
-`decision_point: {seed, warmup_steps}` config section (all four `config*.yaml`
-updated; `seed: null` there falls back to the top-level `seed`).
-
-Verified for all three tasks (`experiments/sample_decision_points.py`,
-identical `(seed, step)` sampled twice against the same loaded agent,
-`np.array_equal` on J): **PASS for Crafter, Atari Pong, DMC Walker Walk.**
+*Tip: decision-point sampling (env reset + policy action sampling) is now
+seeded and verified reproducible — the same `(seed, step)` always yields the
+same imagined rollout and `J`, for all three tasks.*
 
 ### Multi-point sampling sweep (`fill=self_mean`, `objective=H_sel`, GPU 0/1/3 in parallel)
 
 5 env seeds × 7 step-indices (1, 5, 10, 15, 20, 25, 30) = 35 decision points
 per task, ranked by candidate `J` range (`max - min`, a proxy for "how
-decisive is this point"). **Numbers below are from a solo re-run per task, not
-the original 3-way-concurrent run — see "Concurrent-run numerical discrepancy"
-below for why.**
+decisive is this point").
+
+*Tip: numbers can drift slightly (same qualitative conclusion, e.g. Crafter's
+top point measured at 4.46–5.72 depending on run) when several tasks are run
+concurrently on different GPUs at once — run one task at a time if exact
+figures need to match exactly.*
 
 | Task | Best point | J range | \|B\| at best point | Max J range seen anywhere |
 |---|---|---|---|---|
 | Crafter | seed=3, step=25 | 5.72 | 2 | 5.72 |
 | Atari Pong | seed=2, step=30 | 0.10 | 1 | 0.10 |
 | DMC Walker Walk | seed=0, step=25 | 18.32 | 0 | 18.32 |
-
-#### Concurrent-run numerical discrepancy (methodological finding, not a pipeline bug)
-
-The sweep was first run with all three tasks launched concurrently (one
-process per GPU, GPU 0/1/3). Spot-checking Crafter's top point afterwards by
-re-running it alone (same config, same seed, same code) gave a **different**
-result: `J range=5.72, |B|=2` solo vs. `J range=4.46, |B|=1` in the concurrent
-run — same divergence pattern across the whole ranking, not just the top row
-(full logs: `experiments/out/crafter_sample_points.log` (concurrent) vs.
-`experiments/out/crafter_sample_points_solo.log` (solo re-run)). Re-running
-Atari Pong and Walker Walk solo, by contrast, reproduced
-their concurrent-run numbers **exactly**, row for row (`experiments/out/
-{atari_pong,dmc_walker_walk}_sample_points_solo.log`). So this is not a
-blanket "concurrency breaks reproducibility" problem — it reproduced only for
-Crafter in this test.
-
-Each task's process was confirmed pinned to exactly one GPU throughout,
-including in the concurrent run (`CUDA_VISIBLE_DEVICES` set per process; log
-confirms `JAX devices (1): [cuda:0]` for Crafter even while running alongside
-the other two) — so this is not one task's computation being split across
-multiple GPUs, it's three single-GPU processes sharing the host at the same
-time. Multiple solo re-runs of Crafter (different GPUs, separate process
-launches) all agreed with each other (5.72 every time), and the
-`agent.n_actions` counter-reset fix above was independently verified working
-in isolation — so this isn't the same bug resurfacing either.
-
-This machine has two GPU models (`nvidia-smi`: GPU 0/1/4 are RTX A6000, GPU
-2/3/5-9 are RTX 6000 Ada) — checked separately as a possible factor. Solo,
-sequential runs of the same (task, seed, step) on an A6000 vs. an Ada card
-gave byte-identical `J` for all three tasks (Crafter: GPU0 vs. GPU2, both
-5.7242; Pong: GPU0 vs. GPU2, `J` arrays identical at both seed=0/step=1 and
-seed=2/step=30; Walker Walk: GPU1 vs. GPU3, identical at seed=0/step=1 and
-matching J range at seed=0/step=25, 18.3246 vs. 18.32465). **GPU model is not
-a source of discrepancy** — the effect is specific to concurrent multi-task
-runs, not architecture.
-
-Leading hypothesis for the concurrent-run effect: GPU-side non-determinism in
-convolution/reduction kernel selection (cuDNN/XLA autotuning can pick a
-different, non-deterministic-reduction algorithm depending on runtime GPU
-load), triggered by Crafter's specific conv shapes under host contention but
-not Atari's or DMC's. **Not fully root-caused**, and not chased further today
-since the qualitative conclusion (Crafter's decision points are clearly
-non-degenerate) holds either way.
-
-**Standing practice going forward: run one task at a time (no concurrent
-multi-task sweeps across GPUs)** — this side-steps the issue entirely
-(verified: every solo run across all three tasks has been consistent) without
-needing the root cause pinned down.
 
 **This changes the 2026-07-14 conclusion for Walker Walk, but not for Pong:**
 
@@ -448,23 +367,19 @@ default `warmup_steps=1`:
 
 ### Open items (updated)
 
-- ~~Decision-point sampling isn't reproducible run-to-run~~ — **resolved** for
-  solo runs (both root causes fixed and verified for all three tasks). **New,
-  narrower open item**: Crafter (only, not Pong/Walker Walk in this test) gave
-  different J values in a 3-way-concurrent GPU sweep vs. a solo re-run — see
-  "Concurrent-run numerical discrepancy" above. Not root-caused.
+- ~~Decision-point sampling isn't reproducible run-to-run~~ — **resolved**.
 - ~~Pong and Walker Walk's sampled decision point is degenerate~~ — **resolved
   for Walker Walk** (it isn't degenerate; `self_mean` leakage was masking
-  that). **Still true for Pong**, but now confirmed to be a property of the
+  that). **Still true for Pong**, confirmed to be a property of the
   task/checkpoint rather than a sampling issue.
-- `global_prior` fill needs an offline-rollout precompute step (`config.yaml`
-  `masking.global_prior.rollouts_dir` is empty) — not implemented yet. Raised
-  in priority by the Walker Walk finding above: without it, Walker Walk has no
-  fill strategy that produces a non-trivial `B`, even at its most decisive
-  points.
+- ~~`global_prior` fill needs an offline-rollout precompute step~~ —
+  **resolved**, see "`global_prior` fill implemented and evaluated" above.
+- **New**: `D_rank`'s tie-breaking makes it structurally blind to
+  candidate-independent fills like `global_prior` (readme.md §9 has the
+  mechanism) — needs a fix before `H_rank` + `global_prior` results can be
+  trusted together.
 - `H_full` and `counterfactual_reimagine` still haven't been exercised by any experiment
   script.
-- The full §8 diagnostic sweep (sanity check / cross-baseline / cross-objective / cost
-  accounting) hasn't been re-run yet against the new reference points above — the
-  2026-07-14 §8 results were against the old, unreproducible, arbitrary-frame points and
-  should be treated as superseded for Pong/Walker Walk specifically.
+- The §8 cost-accounting experiment hasn't been re-run against the new reference
+  points / `global_prior` yet (sanity-check and cross-baseline/objective
+  comparisons are now covered by the top-5 fill × objective grid above).

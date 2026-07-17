@@ -248,39 +248,97 @@ three objectives (already set in the task configs) — it's no longer just the
 `H_sel`/`H_margin` recommendation, the `H_rank` weakness was a measurement
 artifact, not a real limitation.
 
-### Cross-objective agreement (readme.md §5's planned comparison), `global_prior`, reference points
+### Cross-baseline agreement (readme.md §8.2), `H_sel`, single-point case study
 
-For each task's reference decision point, ran `H_sel`/`H_rank`/`H_margin`
-independently with `global_prior` fill (`experiments/cross_objective_agreement.py`)
-and compared the resulting `B`s:
+Heatmap of pairwise IoU between the `B`s found by each fill strategy, on one
+decision point per task (`experiments/cross_baseline_agreement.py` — this is
+a single-point qualitative case study by design, readme.md §8.2; the
+aggregate non-empty-`B` rates per fill are the "Fill × objective grid" above).
 
-| Task | `B_sel` | `B_rank` | `B_margin` | sel↔rank | sel↔margin | rank↔margin |
-|---|---|---|---|---|---|---|
-| Crafter | `[(29,29)]` | `[(15,16),(17,20)]` | `[(0,7),(8,15),(15,22),(22,29)]` | 0.00 | 0.03 | 0.20 |
-| Atari Pong | `[(7,7)]` | `[(7,7)]` | `[(0,0),(1,8),(9,16),(14,21),(22,29)]` | 1.00 | 0.03 | 0.03 |
-| DMC Walker Walk | `[]` | `[(28,29)]` | `[(0,7),(6,13),(14,21),(22,29)]` | — | — | 0.07 |
+*Caveat: IoU between two **empty** `B`s is defined as 1.0 (∅ literally equals
+∅), which is correct but easy to misread as "these fills found the same
+evidence" when really neither found any — check `|B|` before reading a
+yellow cell as agreement.*
 
-Timelines: `images/{crafter,atari_pong,dmc_walker_walk}/cross_objective_agreement.png`.
+| Task | Point | self_mean | shuffle | zero | global_prior |
+|---|---|---|---|---|---|
+| Crafter | seed=3, step=25 | \|B\|=1 | \|B\|=0 | \|B\|=0 | \|B\|=1 |
+| Atari Pong | seed=2, step=30 | \|B\|=1 | \|B\|=1 | \|B\|=1 | \|B\|=1 |
+| DMC Walker Walk | seed=0, step=5 | \|B\|=1 | \|B\|=1 | \|B\|=1 | \|B\|=1 |
+
+Images: `images/{crafter,atari_pong,dmc_walker_walk}/cross_baseline_agreement.png`.
 
 **Conclusions:**
 
-1. **Confirms readme.md §5's expected size ordering** (`|B_sel| ≤ |B_rank| ≤
-   |B_margin|`) on all three tasks — `H_margin` needs evidence covering
-   almost the entire 30-step horizon, `H_sel` needs at most one single-step
-   segment.
-2. **The three objectives mostly surface different evidence** (IoU 0.00–0.20
-   in 5 of 6 comparisons) — consistent with the 2026-07-14 finding that
-   `sel`/`rank`/`margin` answer genuinely different questions, not a nested
-   "bigger B contains the smaller ones" relationship.
-3. **Exception**: Pong's `B_sel` and `B_rank` are *identical* (`[(7,7)]`,
-   IoU=1.0) — at this point, whatever single segment justifies the top pick
-   also fully explains the entire ranking. A real, task-specific result, not
-   the general pattern (the other two tasks show near-zero sel↔rank overlap).
-4. **Walker Walk's `B_sel` is empty at its reference point** — this is one of
-   the ~20% of points where `global_prior`'s `H_sel` is already trivially
-   satisfied at `B=∅` (matches the earlier sanity-check flag for this same
-   point). Not a useful point for an `H_sel` case study on this task; a
-   different point from the 35-point sweep should be picked if one is needed.
+1. **Crafter**: `self_mean` and `global_prior` agree on the same segment
+   (IoU=1.0); `shuffle` and `zero` both return `B=∅` at this point (the
+   "agreement" between them is the vacuous empty-set case above, not real
+   shared evidence).
+2. **Atari Pong**: `self_mean`/`shuffle`/`zero` all agree on the same segment;
+   `global_prior` finds a *different* one (IoU=0 vs. the other three) — a
+   real, non-trivial disagreement.
+3. **DMC Walker Walk**: the task's usual reference point (seed=0, step=25)
+   turned out to be degenerate for *every* fill under `H_sel` (`B=∅` across
+   the board — an all-yellow, uninformative heatmap, same caveat as above),
+   so this case study uses a different, non-degenerate point from the
+   35-point sweep (seed=0, step=5) instead. There, `self_mean`/`zero`/
+   `global_prior` agree on the same segment and `shuffle` disagrees — same
+   qualitative pattern as Crafter (the non-self-referential-but-still-
+   candidate-blind fills agreeing, `shuffle`'s destroyed ordering picking out
+   something different).
+4. `cross_baseline_agreement.py` now takes `--seed`/`--warmup-steps` to target
+   a specific decision point instead of only the config's default reference
+   point — needed to work around case 3 above, kept as a general option.
+
+### Cross-objective agreement (readme.md §5's planned comparison), `global_prior`
+
+A single point's `B_sel`/`B_rank`/`B_margin` overlap can be an outlier (the
+reference-point case study below turned up an IoU of exactly 1.0 for Pong),
+so this was run two ways: comprehensively across all 35 sampled decision
+points per task, and as a single-point qualitative case study with a
+timeline visualization.
+
+**Comprehensive (35 points/task, `experiments/cross_objective_agreement_sweep.py`):**
+
+| Task | mean \|B_sel\| | mean \|B_rank\| | mean \|B_margin\| | sel↔rank IoU (mean/median) | sel↔margin IoU | rank↔margin IoU |
+|---|---|---|---|---|---|---|
+| Crafter | 4.3 | 12.2 | 14.4 | 0.14 / 0.00 | 0.12 / 0.03 | 0.27 / 0.20 |
+| Atari Pong | 1.0 | 1.7 | 29.7 | 0.08 / 0.00 | 0.04 / 0.03 | 0.06 / 0.03 |
+| DMC Walker Walk | 3.3 | 10.5 | 27.7 | 0.13 / 0.00 | 0.11 / 0.07 | 0.38 / 0.27 |
+
+**Conclusions:**
+
+1. **`|B_sel| < |B_rank| < |B_margin|` holds on average, on every task** —
+   confirms readme.md §5's expected size ordering comprehensively, not just
+   at one point. Pong is the most extreme case: `H_margin` needs to cover
+   almost the entire 30-step horizon on average (29.7/30) while `H_sel`
+   needs about 1 step.
+2. **The three objectives mostly surface different evidence** — median IoU
+   is 0.00–0.27 for every pair, on every task. `rank↔margin` is consistently
+   the most overlapping pair (0.20–0.38 median) — plausible since `H_margin`
+   is the strictest constraint and its evidence set most often ends up
+   covering whatever `H_rank` already needed, plus more.
+3. **Pong's sel==rank coincidence (IoU=1.0) at its reference point is real
+   but uncommon** — happens at 2/35 points for Pong, 1/35 for Walker Walk,
+   0/35 for Crafter. Not a general pattern, just occasionally true.
+4. **`B_sel` is empty** at 7/35 (20%) Crafter points, 6/35 (17%) Walker Walk,
+   2/35 (6%) Pong — matches the `global_prior` `H_sel` non-empty rates from
+   the fill × objective grid above almost exactly (80%/83%/94% non-empty ⟺
+   20%/17%/6% empty), a good cross-check between the two experiments.
+
+**Single-point case study** (reference decision point, `experiments/cross_objective_agreement.py`,
+timelines in `images/{crafter,atari_pong,dmc_walker_walk}/cross_objective_agreement.png`):
+
+| Task | `B_sel` | `B_rank` | `B_margin` |
+|---|---|---|---|
+| Crafter | `[(29,29)]` | `[(15,16),(17,20)]` | `[(0,7),(8,15),(15,22),(22,29)]` |
+| Atari Pong | `[(7,7)]` | `[(7,7)]` | `[(0,0),(1,8),(9,16),(14,21),(22,29)]` |
+| DMC Walker Walk | `[]` | `[(28,29)]` | `[(0,7),(6,13),(14,21),(22,29)]` |
+
+Walker Walk's `B_sel` happens to be empty at this specific reference point
+(one of its 6/35 empty cases) — not a useful point for an `H_sel` case study
+on this task; a different point from the 35-point sweep should be picked if
+one is needed for a write-up figure.
 
 ### Open items (updated)
 
@@ -295,12 +353,13 @@ Timelines: `images/{crafter,atari_pong,dmc_walker_walk}/cross_objective_agreemen
   fills like `global_prior`~~ — **resolved**, see conclusion 2 above.
 - ~~Cross-objective agreement hasn't been re-run against the new reference
   points / `global_prior`~~ — **resolved**, see "Cross-objective agreement" above.
+- ~~`cross_baseline_agreement.py`'s heatmap hasn't been re-run against the new
+  reference points / `global_prior`~~ — **resolved**, see "Cross-baseline
+  agreement" above.
 - `H_full` and `counterfactual_reimagine` still haven't been exercised by any experiment
   script.
-- `cross_baseline_agreement.py`'s heatmap and the §8 cost-accounting experiment
-  haven't been re-run against the new reference points / `global_prior` yet
-  (the numeric substance of a baseline comparison is already covered by the
-  fill × objective grid above, just not as a heatmap image).
+- The §8 cost-accounting experiment hasn't been re-run against the new
+  reference points / `global_prior` yet.
 - `shuffle`'s fill is unseeded (fresh RNG per call, see note above) — low
   priority (doesn't change conclusions) but worth seeding if exact numbers
   need to match run-to-run.

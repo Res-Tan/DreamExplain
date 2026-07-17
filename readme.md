@@ -205,7 +205,10 @@ These three questions are genuinely different explanations and may highlight
 different evidence (e.g., a single decisive event vs. cumulative sustained
 factors). Running them separately, then comparing the resulting `B_sel`,
 `B_rank`, `B_margin` (overlap / Jaccard similarity, visualized positions), is
-itself a planned experiment — not just a hyperparameter sweep.
+itself a planned experiment — not just a hyperparameter sweep. **Done**, see
+results.md 2026-07-15 "Cross-objective agreement": confirmed
+`|B_sel| < |B_rank| < |B_margin|` on average across all three tasks, and low
+pairwise overlap (median IoU 0.00–0.27) between all three objectives.
 
 ## 6. Compactness / Coherence Regularizer
 
@@ -249,17 +252,28 @@ validate the approach itself:
 1. **`B = ∅` sanity check**: for each `fill` strategy, compute `D_dec` (or each of
    `D_sel/D_rank/D_margin`) when nothing is retained. If this is already low-cost
    (near the satisfaction threshold) for a given baseline, that baseline is
-   suspect — flag it in output/report.
+   suspect — flag it in output/report. **Done** (`sanity_check_empty_B.py`,
+   generalized across 35 points/task by `fill_objective_sweep.py` — see
+   results.md 2026-07-15).
 2. **Cross-baseline agreement**: run full search with each `fill` strategy
    (`self_mean`, `global_prior`, `shuffle`, `zero` [reward only],
    `counterfactual_reimagine` [small-scale only]) on the same `(h0, candidates)`
    instance, compute pairwise Jaccard similarity / IoU between resulting `B`s,
-   output as a heatmap.
+   output as a heatmap. **Done**: aggregate rates across all 4 non-expensive
+   fills × 3 objectives × 35 points/task (`fill_objective_sweep.py`), plus the
+   single-point heatmap (`cross_baseline_agreement.py`, now with `--seed`/
+   `--warmup-steps` to target a specific point) — see results.md 2026-07-15.
+   `counterfactual_reimagine` still not exercised by either.
 3. **Cross-objective agreement**: compare `B_sel` vs `B_rank` vs `B_margin` (same
    fill strategy) — Jaccard similarity + visualization of segment positions along
-   the T-step horizon.
+   the T-step horizon. **Done**, both as a 35-point/task aggregate
+   (`cross_objective_agreement_sweep.py`) and a single-point case study with
+   timeline visualization (`cross_objective_agreement.py`) — see results.md
+   2026-07-15.
 4. **Compute-cost accounting**: log wall-clock / number of `G` evaluations per
    `fill` strategy and per objective variant, for a cost-vs-quality table.
+   Not yet re-run against `global_prior` / new reference points (still only
+   the 2026-07-14 `self_mean`-only numbers).
 
 ### Suggested experiment scope (to control compute)
 
@@ -315,16 +329,28 @@ do not hardcode a specific timestamp, take it as a config/CLI arg.
 
 ```
 worldmodel_explain/
-  rollout.py          # wraps DreamerV3 to produce Y_i for each candidate c_i
+  rollout.py          # wraps DreamerV3 to produce Y_i for each candidate c_i;
+                       # sample_decision_points/get_decision_point (reproducible,
+                       # seeded env + policy RNG -- see results.md 2026-07-15)
   segments.py          # builds P, defines B, indicator b_t
-  masking.py            # fill strategies: self_mean, global_prior, zero, shuffle, counterfactual
+  masking.py            # fill strategies: self_mean, global_prior, zero, shuffle,
+                        # counterfactual; save/load_global_prior (prior.npz)
   scoring.py             # G(·) implementation(s); explicit flag for h-dependence
   objectives.py          # D_sel, D_rank, D_margin, D_reg, R(B); H_sel/H_rank/H_margin/H_full
   search.py               # greedy forward selection (extensible)
+  pipeline.py             # Decision class + bootstrap/bootstrap_many glue (rollout ->
+                          # masking -> scoring -> objectives -> search)
   experiments/
     sanity_check_empty_B.py
     cross_baseline_agreement.py
-    cross_objective_agreement.py
+    cross_objective_agreement.py           # single reference-point case study + timeline PNG
+    cross_objective_agreement_sweep.py     # same, aggregated over 35 points/task
     cost_accounting.py
-  config.yaml              # T, D, β/α weights, fill strategy, objective variant, N candidates
+    sample_decision_points.py              # multi-(seed,step) sweep, ranks by J range
+    fill_objective_sweep.py                # fill x objective grid over N points/task
+    build_global_prior.py                  # offline precompute for masking.global_prior
+  priors/<task>/prior.npz    # output of build_global_prior.py, one per task
+  config.yaml              # generic/template config (T, D, β/α weights, fill strategy,
+                            # objective variant, N candidates, decision_point seed/step)
+  config_<task>.yaml         # per-task copies actually used (crafter/atari_pong/dmc_walker_walk)
 ```

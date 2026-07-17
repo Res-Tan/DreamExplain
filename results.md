@@ -90,7 +90,7 @@ flagged.
 
 | Crafter | Atari Pong | DMC Walker Walk |
 |---|---|---|
-| ![Crafter cross-baseline agreement](images/crafter/cross_baseline_agreement.png) | ![Pong cross-baseline agreement](images/atari_pong/cross_baseline_agreement.png) | ![Walker Walk cross-baseline agreement](images/dmc_walker_walk/cross_baseline_agreement.png) |
+| ![Crafter cross-baseline agreement](images/crafter/2026-07-14_cross_baseline_agreement.png) | ![Pong cross-baseline agreement](images/atari_pong/2026-07-14_cross_baseline_agreement.png) | ![Walker Walk cross-baseline agreement](images/dmc_walker_walk/2026-07-14_cross_baseline_agreement.png) |
 
 **Conclusion**: Crafter's fills disagree (`self_mean` |B|=0, `shuffle` |B|=1, `zero`
 |B|=4 covering the full horizon) — `zero` is the outlier/leaking, not evidence the
@@ -102,7 +102,7 @@ degenerate-decision-point issue, not genuine cross-baseline robustness.
 
 | Crafter | Atari Pong | DMC Walker Walk |
 |---|---|---|
-| ![Crafter cross-objective agreement](images/crafter/cross_objective_agreement.png) | ![Pong cross-objective agreement](images/atari_pong/cross_objective_agreement.png) | ![Walker Walk cross-objective agreement](images/dmc_walker_walk/cross_objective_agreement.png) |
+| ![Crafter cross-objective agreement](images/crafter/2026-07-14_cross_objective_agreement.png) | ![Pong cross-objective agreement](images/atari_pong/2026-07-14_cross_objective_agreement.png) | ![Walker Walk cross-objective agreement](images/dmc_walker_walk/2026-07-14_cross_objective_agreement.png) |
 
 **Conclusion**: Crafter confirms readme.md §5's design assumption — `sel`/`rank`/`margin`
 point at genuinely different evidence (`sel=[(9,12)]`, `rank=[]`,
@@ -136,7 +136,7 @@ the most expensive (more segments end up retained → more evals before greedy s
 
 ---
 
-## 2026-07-15
+## 2026-07-17
 
 *Tip: decision-point sampling (env reset + policy action sampling) is now
 seeded and verified reproducible — the same `(seed, step)` always yields the

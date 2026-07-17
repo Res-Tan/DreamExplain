@@ -35,7 +35,7 @@
   2026-07-14 — be mindful of checkpoint/log growth when running new training or
   large diagnostic sweeps (§8).
 - **Tip**: running multiple tasks concurrently across GPUs can cause tiny
-  numerical drift in results (results.md 2026-07-15) — negligible for
+  numerical drift in results (results.md 2026-07-17) — negligible for
   aggregate conclusions, use concurrent GPUs freely; only worth re-running a
   task solo if a specific cited number needs to match exactly.
 - **No sync step needed anymore**: since code, `dreamerv3/`, and `models/` are
@@ -206,7 +206,7 @@ different evidence (e.g., a single decisive event vs. cumulative sustained
 factors). Running them separately, then comparing the resulting `B_sel`,
 `B_rank`, `B_margin` (overlap / Jaccard similarity, visualized positions), is
 itself a planned experiment — not just a hyperparameter sweep. **Done**, see
-results.md 2026-07-15 "Cross-objective agreement": confirmed
+results.md 2026-07-17 "Cross-objective agreement": confirmed
 `|B_sel| < |B_rank| < |B_margin|` on average across all three tasks, and low
 pairwise overlap (median IoU 0.00–0.27) between all three objectives.
 
@@ -254,7 +254,7 @@ validate the approach itself:
    (near the satisfaction threshold) for a given baseline, that baseline is
    suspect — flag it in output/report. **Done** (`sanity_check_empty_B.py`,
    generalized across 35 points/task by `fill_objective_sweep.py` — see
-   results.md 2026-07-15).
+   results.md 2026-07-17).
 2. **Cross-baseline agreement**: run full search with each `fill` strategy
    (`self_mean`, `global_prior`, `shuffle`, `zero` [reward only],
    `counterfactual_reimagine` [small-scale only]) on the same `(h0, candidates)`
@@ -262,14 +262,14 @@ validate the approach itself:
    output as a heatmap. **Done**: aggregate rates across all 4 non-expensive
    fills × 3 objectives × 35 points/task (`fill_objective_sweep.py`), plus the
    single-point heatmap (`cross_baseline_agreement.py`, now with `--seed`/
-   `--warmup-steps` to target a specific point) — see results.md 2026-07-15.
+   `--warmup-steps` to target a specific point) — see results.md 2026-07-17.
    `counterfactual_reimagine` still not exercised by either.
 3. **Cross-objective agreement**: compare `B_sel` vs `B_rank` vs `B_margin` (same
    fill strategy) — Jaccard similarity + visualization of segment positions along
    the T-step horizon. **Done**, both as a 35-point/task aggregate
    (`cross_objective_agreement_sweep.py`) and a single-point case study with
    timeline visualization (`cross_objective_agreement.py`) — see results.md
-   2026-07-15.
+   2026-07-17.
 4. **Compute-cost accounting**: log wall-clock / number of `G` evaluations per
    `fill` strategy and per objective variant, for a cost-vs-quality table.
    Not yet re-run against `global_prior` / new reference points (still only
@@ -297,13 +297,13 @@ main sweep. Instead:
 - [x] How `c_i` are generated — resolved: top-N modes (discrete) / N samples
       (continuous); continuation for t=2..T only implements policy-sampling so far.
 - [x] Source/scale of data for `global_prior` baseline statistics — resolved
-      2026-07-15: per-timestep population means over ~1000 sampled imagined
+      2026-07-17: per-timestep population means over ~1000 sampled imagined
       candidates per task, built by `experiments/build_global_prior.py` and
       loaded automatically by `pipeline.Decision` (see `results.md`).
 - [x] Definition of "transition strength" for `Rdyn` — resolved: local derivative
       magnitude of `r̂`/`û` (see `objectives.py`).
 - [x] `D_rank`'s tie-breaking was structurally blind to candidate-independent
-      fills (`global_prior`) — resolved 2026-07-15: `objectives.d_rank`'s
+      fills (`global_prior`) — resolved 2026-07-17: `objectives.d_rank`'s
       Kendall-tau used to fall back to τ=1 ("ranking fully preserved")
       whenever there were zero concordant/discordant pairs to compare, which
       a candidate-independent fill like `global_prior` trivially hits at
@@ -331,7 +331,7 @@ do not hardcode a specific timestamp, take it as a config/CLI arg.
 worldmodel_explain/
   rollout.py          # wraps DreamerV3 to produce Y_i for each candidate c_i;
                        # sample_decision_points/get_decision_point (reproducible,
-                       # seeded env + policy RNG -- see results.md 2026-07-15)
+                       # seeded env + policy RNG -- see results.md 2026-07-17)
   segments.py          # builds P, defines B, indicator b_t
   masking.py            # fill strategies: self_mean, global_prior, zero, shuffle,
                         # counterfactual; save/load_global_prior (prior.npz)

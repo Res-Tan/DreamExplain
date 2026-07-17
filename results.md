@@ -248,6 +248,40 @@ three objectives (already set in the task configs) — it's no longer just the
 `H_sel`/`H_margin` recommendation, the `H_rank` weakness was a measurement
 artifact, not a real limitation.
 
+### Cross-objective agreement (readme.md §5's planned comparison), `global_prior`, reference points
+
+For each task's reference decision point, ran `H_sel`/`H_rank`/`H_margin`
+independently with `global_prior` fill (`experiments/cross_objective_agreement.py`)
+and compared the resulting `B`s:
+
+| Task | `B_sel` | `B_rank` | `B_margin` | sel↔rank | sel↔margin | rank↔margin |
+|---|---|---|---|---|---|---|
+| Crafter | `[(29,29)]` | `[(15,16),(17,20)]` | `[(0,7),(8,15),(15,22),(22,29)]` | 0.00 | 0.03 | 0.20 |
+| Atari Pong | `[(7,7)]` | `[(7,7)]` | `[(0,0),(1,8),(9,16),(14,21),(22,29)]` | 1.00 | 0.03 | 0.03 |
+| DMC Walker Walk | `[]` | `[(28,29)]` | `[(0,7),(6,13),(14,21),(22,29)]` | — | — | 0.07 |
+
+Timelines: `images/{crafter,atari_pong,dmc_walker_walk}/cross_objective_agreement.png`.
+
+**Conclusions:**
+
+1. **Confirms readme.md §5's expected size ordering** (`|B_sel| ≤ |B_rank| ≤
+   |B_margin|`) on all three tasks — `H_margin` needs evidence covering
+   almost the entire 30-step horizon, `H_sel` needs at most one single-step
+   segment.
+2. **The three objectives mostly surface different evidence** (IoU 0.00–0.20
+   in 5 of 6 comparisons) — consistent with the 2026-07-14 finding that
+   `sel`/`rank`/`margin` answer genuinely different questions, not a nested
+   "bigger B contains the smaller ones" relationship.
+3. **Exception**: Pong's `B_sel` and `B_rank` are *identical* (`[(7,7)]`,
+   IoU=1.0) — at this point, whatever single segment justifies the top pick
+   also fully explains the entire ranking. A real, task-specific result, not
+   the general pattern (the other two tasks show near-zero sel↔rank overlap).
+4. **Walker Walk's `B_sel` is empty at its reference point** — this is one of
+   the ~20% of points where `global_prior`'s `H_sel` is already trivially
+   satisfied at `B=∅` (matches the earlier sanity-check flag for this same
+   point). Not a useful point for an `H_sel` case study on this task; a
+   different point from the 35-point sweep should be picked if one is needed.
+
 ### Open items (updated)
 
 - ~~Decision-point sampling isn't reproducible run-to-run~~ — **resolved**.
@@ -259,11 +293,14 @@ artifact, not a real limitation.
   **resolved**, see "Fill × objective grid, all 35 decision points per task" above.
 - ~~`D_rank`'s tie-breaking makes it structurally blind to candidate-independent
   fills like `global_prior`~~ — **resolved**, see conclusion 2 above.
+- ~~Cross-objective agreement hasn't been re-run against the new reference
+  points / `global_prior`~~ — **resolved**, see "Cross-objective agreement" above.
 - `H_full` and `counterfactual_reimagine` still haven't been exercised by any experiment
   script.
-- The §8 cost-accounting experiment hasn't been re-run against the new reference
-  points / `global_prior` yet (sanity-check and cross-baseline/objective
-  comparisons are now covered by the fill × objective grid above).
+- `cross_baseline_agreement.py`'s heatmap and the §8 cost-accounting experiment
+  haven't been re-run against the new reference points / `global_prior` yet
+  (the numeric substance of a baseline comparison is already covered by the
+  fill × objective grid above, just not as a heatmap image).
 - `shuffle`'s fill is unseeded (fresh RNG per call, see note above) — low
   priority (doesn't change conclusions) but worth seeding if exact numbers
   need to match run-to-run.

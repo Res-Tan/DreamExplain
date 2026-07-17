@@ -170,133 +170,83 @@ point"), and whether greedy search finds any evidence at all (`B` non-empty).
 - **Crafter**: `self_mean` works reasonably well (57%), with no such inverse
   relationship between decisiveness and `B` size.
 
-### Fill × objective grid on the top-5 most decisive points, before implementing `global_prior`
+### Fill × objective grid, all 35 decision points per task
 
-Question: is the `self_mean` failure above specific to that one (fill,
-objective) pair, or does it hold for the other implemented fills (`shuffle`,
-`zero`, reward-only) and the other two objectives (`H_rank`, `H_margin`)?
-Evaluated all 3×3 fill/objective combinations on each task's top-5 most
-decisive points (`experiments/fill_objective_sweep.py`). Cell = % of the 5
-points where greedy search under that (fill, objective) returns a non-empty
-`B`:
-
-**Crafter**
-
-| fill | H_sel | H_rank | H_margin |
-|---|---|---|---|
-| self_mean | 60% | 60% | 100% |
-| shuffle | 40% | 100% | 100% |
-| zero | 40% | 100% | 100% |
-
-**Atari Pong**
-
-| fill | H_sel | H_rank | H_margin |
-|---|---|---|---|
-| self_mean | 20% | 20% | 60% |
-| shuffle | 60% | 100% | 100% |
-| zero | 20% | 20% | 60% |
-
-**DMC Walker Walk**
-
-| fill | H_sel | H_rank | H_margin |
-|---|---|---|---|
-| self_mean | 0% | 0% | 40% |
-| shuffle | 40% | 60% | 100% |
-| zero | 20% | 0% | 80% |
-
-**Conclusions:**
-
-1. **`H_margin` is almost always satisfiable non-trivially** (40–100% across
-   every task/fill combination) — the least likely of the three objectives to
-   trivially collapse to `B=∅`, consistent with readme.md §5's expectation
-   that it's the hardest constraint to satisfy for free.
-2. **`H_sel` is the most fragile** — most often trivially satisfied by
-   `self_mean`/`zero`, worst on Walker Walk (0%) and Pong (20%).
-3. **`shuffle` fill consistently finds more non-trivial evidence than
-   `self_mean`/`zero`, on every task and every objective** — most dramatically
-   on Walker Walk (`H_sel`: 40% vs. 0%/20%; `H_rank`: 60% vs. 0%/0%) and Pong
-   (`H_sel`: 60% vs. 20%/20%). `shuffle` preserves each candidate's actual
-   per-step values but destroys their order, so unlike `self_mean`/`zero` it
-   cannot reconstruct a trajectory's aggregate magnitude for free — direct
-   supporting evidence for the self-leakage explanation above.
-4. **`self_mean` and `zero` behave identically on Pong** (same rates in every
-   cell) — consistent with Pong's reward being sparse/near-zero at most
-   steps, so masking it to zero and masking it to its own mean converge.
-
-**Practical takeaway**: `shuffle` is a free, already-implemented improvement
-over `self_mean` for Walker Walk and Pong, and should be preferred over
-`self_mean` in reporting until `global_prior` is implemented. `global_prior`
-itself is untested here and may behave differently from either.
-
-### `global_prior` fill implemented and evaluated
-
-Closes the readme.md §9 open item. Population-level per-timestep means for
-`{r, u, d}` are estimated from ~1000 samples per imagined timestep (many
-decision points across seeds disjoint from the reference points elsewhere in
-this doc, each contributing its `N=8` imagined candidates;
-`experiments/build_global_prior.py`), saved per task under
-`worldmodel_explain/priors/<task>/prior.npz`, and loaded automatically by
-`pipeline.Decision` whenever `fill='global_prior'`. Re-ran the same top-5 ×
-fill × objective grid as above with `global_prior` added:
+Comprehensive version of the diagnostic above: is `self_mean`'s weakness
+specific to that one (fill, objective) pair, or does it hold for the other
+fills (`shuffle`, `zero`, and — once built, see below — `global_prior`) and
+the other two objectives (`H_rank`, `H_margin`)? All 4×3 fill/objective
+combinations evaluated on *all 35* decision points per task (not just the
+most decisive few — `experiments/fill_objective_sweep.py --top-k 1000`).
+`global_prior` uses population-level per-timestep means for `{r, u, d}`,
+estimated from ~1000 sampled imagined candidates per task
+(`experiments/build_global_prior.py`, saved to
+`worldmodel_explain/priors/<task>/prior.npz`, closing the readme.md §9 open
+item). Cell = % of the 35 points where greedy search returns a non-empty `B`:
 
 **Crafter**
 
 | fill | H_sel | H_rank | H_margin |
 |---|---|---|---|
-| self_mean | 60% | 60% | 100% |
-| shuffle | 60% | 80% | 100% |
-| zero | 40% | 100% | 100% |
-| global_prior | 60% | 0% | 100% |
+| self_mean | 54% | 80% | 94% |
+| shuffle | 69% | 91% | 100% |
+| zero | 71% | 100% | 100% |
+| global_prior | 80% | 0% | 97% |
 
 **Atari Pong**
 
 | fill | H_sel | H_rank | H_margin |
 |---|---|---|---|
-| self_mean | 20% | 20% | 60% |
-| shuffle | 60% | 100% | 100% |
-| zero | 20% | 20% | 60% |
-| global_prior | 100% | 0% | 100% |
+| self_mean | 31% | 46% | 51% |
+| shuffle | 80% | 100% | 100% |
+| zero | 31% | 46% | 51% |
+| global_prior | 94% | 0% | 100% |
 
 **DMC Walker Walk**
 
 | fill | H_sel | H_rank | H_margin |
 |---|---|---|---|
-| self_mean | 0% | 0% | 40% |
-| shuffle | 20% | 40% | 100% |
-| zero | 20% | 0% | 80% |
-| global_prior | 80% | 0% | 100% |
+| self_mean | 23% | 34% | 80% |
+| shuffle | 69% | 91% | 97% |
+| zero | 54% | 57% | 94% |
+| global_prior | 83% | 0% | 100% |
 
 **Conclusions:**
 
-1. **`global_prior` is the strongest fill for `H_sel`, by a wide margin, on
-   every task** — Pong 100% (vs. 20–60% for the others), Walker Walk 80% (vs.
-   0–20%), Crafter 60% (tied for best). This directly fixes the readme.md §3
-   self-leakage failure: unlike `self_mean`, the replacement value for a
-   masked step no longer depends on that trajectory's own magnitude, so it
-   can no longer "leak" the answer for free.
-2. **`global_prior` gives `H_rank = 0%` on every task — but this is a
-   structural artifact of the metric, not evidence the fill is uninformative
-   for ranking.** Verified directly (Crafter, top point): fully masking with
-   `global_prior` (`B=∅`) collapses all 8 candidates' scores to the *same*
-   value (`J̃ = [5.838, 5.838, ..., 5.838]`, since the replacement curve
-   doesn't depend on which candidate it's filling), and `objectives.d_rank`'s
-   Kendall-tau falls back to τ=1 ("ranking preserved") when there are zero
-   concordant/discordant pairs to compare — a defensible tie-break in
-   general, but here it means a fully-collapsed, uninformative ranking gets
-   scored identically to a perfectly-preserved one, so `H_rank(∅)` is always
-   already at its minimum and greedy search never has a reason to add
-   anything back in. This only bites candidate-independent fills; `self_mean`
-   /`shuffle`/`zero` keep some per-candidate structure at `B=∅` and don't hit
-   it. Flagged as a metric limitation worth revisiting (e.g. penalizing total
-   ties instead of defaulting them to "preserved"), not re-derived today.
-3. **`H_margin` is saturated (100%) under `global_prior` on all three
-   tasks**, same pattern as the other fills.
+1. **`global_prior` is the best fill for `H_sel` on every task** (80–94%,
+   vs. 23–71% for the others) — it fixes `self_mean`'s self-leakage failure
+   (readme.md §3): the replacement value for a masked step no longer depends
+   on that candidate's own magnitude, so it can't "leak" the answer for free.
+2. **`global_prior` gives `H_rank = 0% on every task — a structural artifact
+   of the metric, not evidence it's uninformative for ranking.** Verified
+   directly: fully masking with `global_prior` collapses all 8 candidates'
+   scores to the *same* value (e.g. `J̃ = [5.838, 5.838, ...]`, since the
+   replacement curve doesn't depend on candidate identity), and
+   `objectives.d_rank`'s Kendall-tau defaults to τ=1 ("ranking preserved")
+   whenever there are zero concordant/discordant pairs to compare — so a
+   fully-collapsed, uninformative ranking scores identically to a
+   perfectly-preserved one, and greedy search never has a reason to add
+   anything back. Only candidate-independent fills hit this;
+   `self_mean`/`shuffle`/`zero` keep per-candidate structure at `B=∅` and
+   don't. Metric limitation worth revisiting (e.g. penalize total ties
+   instead of defaulting them to "preserved") — not fixed today; use
+   `shuffle` for `H_rank` results until it is.
+3. **`shuffle` and `zero` are the most reliable all-rounders** — both beat
+   `self_mean` on nearly every task/objective, `zero` especially strongly
+   on Crafter/Pong `H_rank`/`H_margin` (100%).
+4. **`self_mean` is weakest overall and specifically fails worse the more
+   decisive the point is, on Walker Walk**: restricting to just its 5 most
+   decisive points (J range 7.5–18.3) drops `self_mean`'s `H_sel` rate to 0%
+   (vs. 23% pooled over all 35) — direct evidence the self-leakage effect
+   scales with how much of the signal is a sustained, global quantity
+   (Walker Walk's return ≈ average velocity) rather than a local event.
+5. **`self_mean` and `zero` behave identically on Pong** (identical rates in
+   every cell) — Pong's reward is sparse/near-zero at most steps, so masking
+   it to zero and masking it to its own mean converge.
 
 **Practical takeaway**: `global_prior` should replace `self_mean` as the
-default fill for `H_sel`- and `H_margin`-based results, including as the
-fix for Walker Walk's `H_sel` failure (0% under `self_mean` → 80% under
-`global_prior`). For `H_rank` specifically, use `shuffle` instead of
-`global_prior` until the tie-handling issue above is addressed.
+default fill for `H_sel`/`H_margin` reporting (already done in the task
+configs); use `shuffle` for `H_rank` until the tie-handling issue is fixed.
 
 ### Open items (updated)
 

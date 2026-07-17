@@ -266,7 +266,9 @@ yellow cell as agreement.*
 | Atari Pong | seed=2, step=30 | \|B\|=1 | \|B\|=1 | \|B\|=1 | \|B\|=1 |
 | DMC Walker Walk | seed=0, step=5 | \|B\|=1 | \|B\|=1 | \|B\|=1 | \|B\|=1 |
 
-Images: `images/{crafter,atari_pong,dmc_walker_walk}/cross_baseline_agreement.png`.
+| Crafter | Atari Pong | DMC Walker Walk |
+|---|---|---|
+| ![Crafter cross-baseline agreement](images/crafter/cross_baseline_agreement.png) | ![Pong cross-baseline agreement](images/atari_pong/cross_baseline_agreement.png) | ![Walker Walk cross-baseline agreement](images/dmc_walker_walk/cross_baseline_agreement.png) |
 
 **Conclusions:**
 
@@ -326,14 +328,17 @@ timeline visualization.
    the fill × objective grid above almost exactly (80%/83%/94% non-empty ⟺
    20%/17%/6% empty), a good cross-check between the two experiments.
 
-**Single-point case study** (reference decision point, `experiments/cross_objective_agreement.py`,
-timelines in `images/{crafter,atari_pong,dmc_walker_walk}/cross_objective_agreement.png`):
+**Single-point case study** (reference decision point, `experiments/cross_objective_agreement.py`):
 
 | Task | `B_sel` | `B_rank` | `B_margin` |
 |---|---|---|---|
 | Crafter | `[(29,29)]` | `[(15,16),(17,20)]` | `[(0,7),(8,15),(15,22),(22,29)]` |
 | Atari Pong | `[(7,7)]` | `[(7,7)]` | `[(0,0),(1,8),(9,16),(14,21),(22,29)]` |
 | DMC Walker Walk | `[]` | `[(28,29)]` | `[(0,7),(6,13),(14,21),(22,29)]` |
+
+| Crafter | Atari Pong | DMC Walker Walk |
+|---|---|---|
+| ![Crafter cross-objective agreement](images/crafter/cross_objective_agreement.png) | ![Pong cross-objective agreement](images/atari_pong/cross_objective_agreement.png) | ![Walker Walk cross-objective agreement](images/dmc_walker_walk/cross_objective_agreement.png) |
 
 Walker Walk's `B_sel` happens to be empty at this specific reference point
 (one of its 6/35 empty cases) — not a useful point for an `H_sel` case study

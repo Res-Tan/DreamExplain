@@ -288,22 +288,15 @@ main sweep. Instead:
       loaded automatically by `pipeline.Decision` (see `results.md`).
 - [x] Definition of "transition strength" for `Rdyn` — resolved: local derivative
       magnitude of `r̂`/`û` (see `objectives.py`).
-- [ ] **`D_rank`'s tie-breaking makes it structurally blind to
-      candidate-independent fills (`global_prior`).** `objectives.d_rank`'s
-      Kendall-tau falls back to τ=1 ("ranking fully preserved") whenever
-      there are zero concordant/discordant pairs to compare. A
-      candidate-independent fill like `global_prior` makes every candidate's
-      masked score identical at `B=∅` (verified: 8 candidates collapse to one
-      value), which trivially hits this zero-pairs case — so `H_rank(∅)` is
-      always already at its minimum for `global_prior`, and greedy search
-      never adds anything back in (0% non-empty `B` across all three tasks,
-      results.md 2026-07-15). This reads as "ranking preserved" when the
-      ranking was actually destroyed entirely. `self_mean`/`shuffle`/`zero`
-      don't hit this (they keep some per-candidate structure at `B=∅`), so
-      it's specific to fills without per-candidate variation. Needs a
-      tie-handling fix (e.g. score total ties as a `D_rank` cost rather than
-      defaulting to 0) before `H_rank` + `global_prior` can be trusted
-      together; until then, use `shuffle` for `H_rank` results.
+- [x] `D_rank`'s tie-breaking was structurally blind to candidate-independent
+      fills (`global_prior`) — resolved 2026-07-15: `objectives.d_rank`'s
+      Kendall-tau used to fall back to τ=1 ("ranking fully preserved")
+      whenever there were zero concordant/discordant pairs to compare, which
+      a candidate-independent fill like `global_prior` trivially hits at
+      `B=∅` (all candidates' masked scores collapse to one value). Fixed by
+      defaulting to τ=-1 (worst case) instead; `global_prior`'s `H_rank`
+      non-empty-`B` rate went from 0% to 100% on all three tasks once fixed
+      (see `results.md`).
 
 See `results.md` (same folder) for the experiment-progress log, including open items found
 only once evaluation started (degenerate decision points, decision-point

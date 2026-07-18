@@ -392,39 +392,78 @@ case studies. Numbers below are the solo-verified ones.*
 
 | Multiplier | Crafter cov / D_margin | Pong cov / D_margin | Walker Walk cov / D_margin |
 |---|---|---|---|
-| ×1 (baseline) | 14.1/30 / 0.42 | 29.8/30 / 0.00 | 27.7/30 / 0.03 |
-| ×3 | 11.1/30 / 0.54 | 29.8/30 / 0.00 | 27.8/30 / 0.03 |
-| ×5 | 8.1/30 / 0.69 | 29.8/30 / 0.00 | 21.5/30 / 0.25 |
-| ×7 | 2.8/30 / 0.99 | 27.3/30 / 0.10 | 13.8/30 / 0.55 |
-| ×9 | 0.8/30 / 1.08 | 20.1/30 / 0.37 | 4.3/30 / 0.92 |
+| ×1 (baseline) | 14.6/30 / 0.41 | 29.8/30 / 0.00 | 27.7/30 / 0.03 |
+| ×2 | 13.4/30 / 0.44 | 29.8/30 / 0.00 | 27.8/30 / 0.03 |
+| ×3 | 12.1/30 / 0.51 | 29.8/30 / 0.00 | 27.8/30 / 0.03 |
+| ×4 | 10.3/30 / 0.59 | 29.8/30 / 0.00 | 24.4/30 / 0.15 |
+| ×5 | 8.7/30 / 0.68 | 29.8/30 / 0.00 | 21.5/30 / 0.25 |
+| ×6 | 5.7/30 / 0.81 | 29.8/30 / 0.00 | 15.5/30 / 0.48 |
+| ×7 | 2.5/30 / 1.01 | 27.3/30 / 0.10 | 13.8/30 / 0.55 |
+| ×8 | 0.6/30 / 1.09 | 24.3/30 / 0.21 | 9.1/30 / 0.71 |
+| ×9 | 0.5/30 / 1.11 | 20.1/30 / 0.37 | 4.3/30 / 0.92 |
+| ×10 | 0.2/30 / 1.12 | 11.1/30 / 0.72 | 3.8/30 / 0.94 |
+| ×11 | 0.0/30 / 1.14 | 6.8/30 / 0.88 | 2.9/30 / 0.97 |
 | ×12 | 0.0/30 / 1.14 | 3.4/30 / 1.01 | 2.5/30 / 0.99 |
-| ×15–20 | 0.0/30 / 1.14 | 0.0/30 / 1.14 | 1.1–0.0/30 / 1.06–1.14 |
+| ×13 | 0.0/30 / 1.14 | 1.7/30 / 1.08 | 2.1/30 / 1.02 |
+| ×14 | 0.0/30 / 1.14 | 0.0/30 / 1.14 | 1.2/30 / 1.06 |
+| ×15 | 0.0/30 / 1.14 | 0.0/30 / 1.14 | 1.1/30 / 1.06 |
+| ×20 | 0.0/30 / 1.14 | 0.0/30 / 1.14 | 0.0/30 / 1.14 |
 
 **Corrected conclusion: there is a real, usable middle ground — the earlier
 "cliff" (from the very first coarse 1/3/10/30/100 grid) was a sampling
 artifact, not a property of `D_margin`.** All three tasks show a genuine
-gradual decline on average, not a step function. But **the transition
-happens at a different multiplier for each task, so a shared multiplier
-across tasks isn't the right framing** (readme.md §6's "same weights for a
-fair comparison" applies to comparing `H_sel`/`H_rank`/`H_margin` *within* a
-task, not to reusing one `H_margin` compactness setting *across* tasks):
+gradual decline in the *mean* coverage, not a step function. But **the
+transition happens at a different multiplier for each task, so a shared
+multiplier across tasks isn't the right framing** (readme.md §6's
+"same weights for a fair comparison" applies to comparing `H_sel`/`H_rank`/
+`H_margin` *within* a task, not to reusing one `H_margin` compactness
+setting *across* tasks): Pong needs the strongest push (flat through ×6,
+only starts declining at ×7); Crafter responds fastest (already declining by
+×2); Walker Walk is in between.
 
-- **Pong needs the strongest push**: completely flat from ×1–×6 (the default
-  weights are simply too weak to register at all), only starts declining at
-  ×7, reaching a moderate compactness/faithfulness point around ×9–10
-  (20→11 out of 30 covered, `D_margin` 0.37→0.72).
-- **Crafter responds fastest**: already declining by ×2, with a usable
-  middle ground around ×3–5 (8–11 of 30 covered, `D_margin` 0.54–0.69) —
-  pushing to ×7+ over-compresses it (down to 2.8/30).
-- **Walker Walk is in between**, gradual middle ground around ×5–7
-  (14–22 of 30, `D_margin` 0.25–0.55).
+**But a smooth mean does not imply any individual point degrades smoothly —
+checked the actual per-point distribution behind these means, not just the
+mean itself, and it differs sharply by task:**
 
-**Practical takeaway**: a per-task regularizer multiplier (roughly ×3–5 for
-Crafter, ×5–7 for Walker Walk, ×9–10 for Pong) gives a genuinely more compact
-`B_margin` at a moderate, non-catastrophic `D_margin` cost — worth adopting
-per-task if `H_margin` explanations are needed for a write-up, rather than
-the shared ×1 weights that currently make it degenerate to near-full-horizon
-coverage.
+Points per coverage bucket (0–4 / 5–9 / 10–14 / 15–19 / 20–24 / 25–30), out of
+35, at a few representative multipliers (full breakdown at all 16
+multipliers: `experiments/out/*_margin_regularizer_sweep_hist_solo.log`):
+
+| Multiplier | Crafter | Pong | Walker Walk |
+|---|---|---|---|
+| ×1 | 6 / 7 / 7 / 5 / 1 / 9 | 0 / 0 / 0 / 0 / 0 / **35** | 0 / 0 / 1 / 4 / 1 / 29 |
+| ×9 | 33 / 2 / 0 / 0 / 0 / 0 | **11** / 0 / 0 / 1 / 0 / **23** | 27 / 1 / 1 / 4 / 0 / 2 |
+| ×10 | 34 / 1 / 0 / 0 / 0 / 0 | **22** / 0 / 0 / 0 / 0 / **13** | 28 / 1 / 1 / 3 / 0 / 2 |
+
+- **Pong's distribution is essentially bimodal at every multiplier**: at
+  ×9, 23/35 points are still fully covered (25–30 bucket) and 11/35 have
+  already collapsed to near-empty (0–4), with only **1** point anywhere in
+  between. The population mean (20.1/30) is not a "typical point" value —
+  it is purely the *proportion* of points that have flipped, averaged
+  against those that haven't. Turning the multiplier up on Pong doesn't
+  make individual explanations more compact; it changes what *fraction* of
+  decision points get a compact-or-empty explanation instead of a full one.
+- **Crafter's distribution is genuinely spread, not bimodal**: at ×1 the 35
+  points are spread fairly evenly across all six buckets (6/7/7/5/1/9), and
+  the whole distribution shifts left together as the multiplier increases,
+  rather than splitting into two piles. The population mean here **is**
+  representative of what a typical point looks like.
+- **Walker Walk is in between**: mostly concentrated at the extremes like
+  Pong, but with a small, persistent cluster in the 15–19 bucket across many
+  multipliers (this is where the stable, compact (seed=3,step=5) point from
+  the case study below lives) — a genuine minority of points that behave
+  like Crafter's smooth case, sitting inside an otherwise Pong-like bimodal
+  majority.
+
+**Practical takeaway, revised**: a per-task regularizer multiplier (roughly
+×3–5 for Crafter, ×5–7 for Walker Walk, ×9–10 for Pong) is still the right
+per-task recommendation for the *population*, but what it buys differs by
+task. For **Crafter**, tuning genuinely makes a typical explanation more
+compact. For **Pong**, tuning mostly just trades off how many decision points
+get a (usually near-empty) explanation vs. a full one — it will rarely land
+an arbitrary point on a nice intermediate `B_margin`. **Walker Walk** is
+mixed: works well for the minority of points with real intermediate
+structure, bimodal for the rest.
 
 ### Case study with randomly-selected points, not the max-`J`-range one
 

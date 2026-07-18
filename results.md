@@ -377,38 +377,54 @@ assuming one multiplier has to work for all three** — the transition point is
 genuinely different per task. Mean coverage (of `T=30`) / mean `D_margin` at
 the search's final `B`, `global_prior` fill, all 35 points per task:
 
+*Re-run solo/sequentially (no concurrent GPU jobs) after the concurrency
+issue below turned out to affect margin computations more than expected —
+see "Case study with randomly-selected points" for the full story. Checked
+this population-level (35-point mean) version against its original
+concurrent-run numbers directly: **Walker Walk was identical, Pong nearly
+identical (only ×9/×10 shifted, consistent with the single-point finding that
+concurrency made Pong transition about one multiplier step early), Crafter
+shifted more (drops noticeably faster in the solo version) but the same
+qualitative shape held up.** Averaging over 35 points evidently washes out
+most of the concurrency noise that seriously corrupted individual-point
+checks — this table was already fairly reliable, unlike the single-point
+case studies. Numbers below are the solo-verified ones.*
+
 | Multiplier | Crafter cov / D_margin | Pong cov / D_margin | Walker Walk cov / D_margin |
 |---|---|---|---|
-| ×1 (baseline) | 14.8/30 / 0.40 | 29.7/30 / 0.00 | 27.7/30 / 0.03 |
-| ×3 | 13.1/30 / 0.49 | 29.8/30 / 0.00 | 27.8/30 / 0.03 |
-| ×5 | 12.7/30 / 0.52 | 29.9/30 / 0.00 | 21.5/30 / 0.25 |
-| ×7 | 6.3/30 / 0.78 | 27.3/30 / 0.10 | 13.8/30 / 0.55 |
-| ×9 | 2.4/30 / 0.98 | 15.3/30 / 0.56 | 4.3/30 / 0.92 |
-| ×12 | 0.0/30 / 1.14 | 2.6/30 / 1.05 | 2.5/30 / 0.99 |
-| ×15–20 | 0.0/30 / 1.14 | 0.0/30 / 1.14 | 0.0–1.1/30 / 1.06–1.14 |
+| ×1 (baseline) | 14.1/30 / 0.42 | 29.8/30 / 0.00 | 27.7/30 / 0.03 |
+| ×3 | 11.1/30 / 0.54 | 29.8/30 / 0.00 | 27.8/30 / 0.03 |
+| ×5 | 8.1/30 / 0.69 | 29.8/30 / 0.00 | 21.5/30 / 0.25 |
+| ×7 | 2.8/30 / 0.99 | 27.3/30 / 0.10 | 13.8/30 / 0.55 |
+| ×9 | 0.8/30 / 1.08 | 20.1/30 / 0.37 | 4.3/30 / 0.92 |
+| ×12 | 0.0/30 / 1.14 | 3.4/30 / 1.01 | 2.5/30 / 0.99 |
+| ×15–20 | 0.0/30 / 1.14 | 0.0/30 / 1.14 | 1.1–0.0/30 / 1.06–1.14 |
 
 **Corrected conclusion: there is a real, usable middle ground — the earlier
-"cliff" was a sampling artifact, not a property of `D_margin`.** All three
-tasks show a genuine gradual decline, not a step function. But **the
-transition happens at a different multiplier for each task, so a shared
-multiplier across tasks isn't the right framing** (readme.md §6's
-"same weights for a fair comparison" applies to comparing `H_sel`/`H_rank`/
-`H_margin` *within* a task, not to reusing one `H_margin` compactness setting
-*across* tasks):
+"cliff" (from the very first coarse 1/3/10/30/100 grid) was a sampling
+artifact, not a property of `D_margin`.** All three tasks show a genuine
+gradual decline on average, not a step function. But **the transition
+happens at a different multiplier for each task, so a shared multiplier
+across tasks isn't the right framing** (readme.md §6's "same weights for a
+fair comparison" applies to comparing `H_sel`/`H_rank`/`H_margin` *within* a
+task, not to reusing one `H_margin` compactness setting *across* tasks):
 
 - **Pong needs the strongest push**: completely flat from ×1–×6 (the default
   weights are simply too weak to register at all), only starts declining at
-  ×7, reaching a moderate compactness/faithfulness point around ×8–9
-  (24→15 out of 30 covered, `D_margin` 0.23→0.56).
-- **Crafter and Walker Walk respond earlier and more smoothly**, with a
-  usable middle ground around ×5–×7 (Crafter: 6–13 of 30 covered, `D_margin`
-  0.49–0.78; Walker Walk: 14–22 of 30, `D_margin` 0.25–0.55).
+  ×7, reaching a moderate compactness/faithfulness point around ×9–10
+  (20→11 out of 30 covered, `D_margin` 0.37→0.72).
+- **Crafter responds fastest**: already declining by ×2, with a usable
+  middle ground around ×3–5 (8–11 of 30 covered, `D_margin` 0.54–0.69) —
+  pushing to ×7+ over-compresses it (down to 2.8/30).
+- **Walker Walk is in between**, gradual middle ground around ×5–7
+  (14–22 of 30, `D_margin` 0.25–0.55).
 
-**Practical takeaway**: a per-task regularizer multiplier (roughly ×5–7 for
-Crafter/Walker Walk, ×8–9 for Pong) gives a genuinely more compact `B_margin`
-at a moderate, non-catastrophic `D_margin` cost — worth adopting per-task if
-`H_margin` explanations are needed for a write-up, rather than the shared ×1
-weights that currently make it degenerate to near-full-horizon coverage.
+**Practical takeaway**: a per-task regularizer multiplier (roughly ×3–5 for
+Crafter, ×5–7 for Walker Walk, ×9–10 for Pong) gives a genuinely more compact
+`B_margin` at a moderate, non-catastrophic `D_margin` cost — worth adopting
+per-task if `H_margin` explanations are needed for a write-up, rather than
+the shared ×1 weights that currently make it degenerate to near-full-horizon
+coverage.
 
 ### Case study with randomly-selected points, not the max-`J`-range one
 
@@ -422,14 +438,28 @@ regularizer-multiplier sweep (×1–20, `experiments/margin_regularizer_sweep.py
 on a single point at a time) on each individually, instead of just an
 ×1-vs-one-tuned-value snapshot:
 
+*Correction: this sweep was first run with all three tasks concurrently (one
+GPU each) — the same concurrency-noise phenomenon flagged earlier in this
+doc, but far more consequential here, since these margin computations sit
+right at a sharp per-point threshold (see below) where even small numerical
+noise flips the qualitative outcome rather than just nudging a number.
+Re-ran all 9 points solo/sequentially (single process, no concurrent GPU
+jobs at all) after noticing Pong's concurrent-run numbers didn't reproduce on
+a spot-check; two of Crafter's three points changed substantially between the
+concurrent and solo runs (one point's "before" coverage was 30/30 concurrent
+vs. 13–14/30 solo; a reported non-monotonic anomaly at another point
+disappeared entirely under the solo re-run, i.e. it was a concurrency
+artifact, not a real property of greedy search). Numbers below are the
+solo-verified ones.*
+
 | Task | Point (seed,step) | Coverage @×1 | Behavior across ×1–20 |
 |---|---|---|---|
-| Crafter | (4,25) | 30/30 | flat at 30/30 through ×6, clean jump to 0/30 at ×7 |
-| Crafter | (2,25) | 8/30 | **already compact**, drops to 0/30 by ×2 |
-| Crafter | (4,30) | 12/30 | **non-monotonic**: rises to 30/30 at ×2–5, then drops to 0/30 at ×6 |
-| Atari Pong | (3,20) | 29/30 | flat through ×9, clean jump to 0/30 at ×10 |
-| Atari Pong | (4,1) | 30/30 | flat through ×8, clean jump to 0/30 at ×9 |
-| Atari Pong | (0,5) | 29/30 | flat through ×8, clean jump to 0/30 at ×9 |
+| Crafter | (4,25) | 13/30 | rises slightly to 14/30 at ×2–6, clean jump to 0/30 at ×7 |
+| Crafter | (2,25) | 10/30 | flat at ×1–2, partial step to 2/30 at ×3, 0/30 from ×4 |
+| Crafter | (4,30) | 30/30 | flat through ×4, clean jump to 0/30 at ×5 |
+| Atari Pong | (3,20) | 30/30 | flat through ×9, clean jump to 0/30 at ×10 |
+| Atari Pong | (4,1) | 30/30 | flat through ×9, clean jump to 0/30 at ×10 |
+| Atari Pong | (0,5) | 29/30 | flat through ×9, clean jump to 0/30 at ×10 |
 | Walker Walk | (1,25) | 30/30 | flat through ×10, clean jump to 0/30 by ×12 |
 | Walker Walk | (3,5) | 14/30 | **stable and compact** at 14/30 across ×1–8, drops to 0/30 at ×9 |
 | Walker Walk | (4,25) | 30/30 | flat through ×5, clean jump to 0/30 at ×6 |
@@ -438,34 +468,35 @@ Timeline images for one representative point per task:
 `images/crafter/cross_objective_agreement_random2.png` (seed=2,step=25),
 `images/atari_pong/cross_objective_agreement_random2.png` (seed=4,step=1),
 `images/dmc_walker_walk/cross_objective_agreement_random2.png` (seed=3,step=5).
+(Generated as standalone solo runs, unaffected by the concurrency issue above.)
 
 **Conclusions:**
 
-1. **7 of 9 randomly-drawn points are pure step functions** — flat at full
-   (30/30, or 29/30) coverage, then a single clean jump straight to `B=∅`
-   at a point-specific multiplier threshold, which itself varies a lot even
-   within one task (Walker Walk's three points jump at ×6, ×9, and ×12).
-   This reconfirms, with 9 fresh points instead of 1, that individual points
-   generally don't degrade gradually.
-2. **2 of 9 points are genuinely compact already, no tuning needed**:
-   Crafter (2,25) at 8/30, and — the best example found so far — **Walker
-   Walk (3,5), stably compact at 14/30 across the entire ×1–8 range**
-   before eventually collapsing at ×9. This is a real, non-degenerate,
-   tuning-robust `H_margin` explanation, not a knife-edge artifact.
-3. **One point, Crafter (4,30), was non-monotonic**: coverage went
-   30→12→30→30→30→30→0 as the multiplier increased from ×1 to ×7 (rose
-   *before* falling). Greedy forward selection is a heuristic, not an exact
-   optimizer, so it isn't guaranteed to shrink `B` monotonically as
-   regularization strengthens — noted as an observed quirk, not
-   investigated further today.
+1. **6 of 9 randomly-drawn points are pure step functions** — flat at a
+   constant coverage, then a single clean jump straight to `B=∅` at a
+   point-specific multiplier threshold that varies a lot even within one
+   task (Walker Walk's three points jump between ×5–6, ×8–9, and ×10–12).
+2. **2 of 9 points are naturally compact and *stable* across a wide
+   multiplier range, no tuning needed**: Crafter (4,25) sits at 13–14/30
+   through ×1–6, and Walker Walk (3,5) sits at 14/30 through ×1–8 — both
+   genuinely non-degenerate, tuning-robust `H_margin` explanations.
+3. **1 of 9 points, Crafter (2,25), shows a real (if brief) intermediate
+   step**: 10/30 at ×1–2, then 2/30 at ×3, then 0/30 from ×4 — a genuine
+   3-level transition rather than a single binary jump, though still fast.
 
 **Calibrated takeaway**: representative (random) points confirm the
 population-level story — most individual points are either already fine or
-flip to empty at their own threshold, and only a minority (here ~2/9) give a
+flip to empty at their own threshold, and only a minority (here 3/9) give a
 genuinely compact, non-degenerate `B_margin` without needing to hit exactly
 the right multiplier. `H_margin` explanations should be presented with this
-caveat; Walker Walk (3,5) is the cleanest illustrative example available so
-far if one compact case is needed for a write-up.
+caveat; Walker Walk (3,5) and Crafter (4,25) are the cleanest illustrative
+examples found so far if a compact case is needed for a write-up.
+
+**Methodological note**: any future analysis of margin-regularizer behavior
+near a threshold must run solo/sequentially from the start — this isn't
+optional caution, it's what this exact re-run just demonstrated: concurrent
+GPU noise was large enough here to fabricate a "non-monotonic" finding out of
+thin air and to misreport one point's coverage by more than 2x.
 
 ### Open items (updated)
 
@@ -485,14 +516,14 @@ far if one compact case is needed for a write-up.
   agreement" above.
 - ~~`H_margin`'s large `B` is mostly degenerate (near-full-horizon coverage,
   especially Pong/Walker Walk) with the shared (×1) regularizer weights~~ —
-  **partially resolved**: a per-task regularizer multiplier (×5–7 for
-  Crafter/Walker Walk, ×8–9 for Pong) recovers a genuinely compact
+  **partially resolved**: a per-task regularizer multiplier (×3–5 for
+  Crafter, ×5–7 for Walker Walk, ×9–10 for Pong) recovers a genuinely compact
   `B_margin` *on average* — see "Regularizer strength vs. `H_margin`
   compactness" and "Case study with randomly-selected points" above.
-  **Caveat**: not a guaranteed per-point fix — 7/9 randomly-drawn points are
+  **Caveat**: not a guaranteed per-point fix — 6/9 randomly-drawn points are
   pure step functions with their own threshold, so the tuned multiplier can
   still land a specific point on the wrong side (full or empty) rather than
-  a nice middle; only 2/9 random points were genuinely compact without
+  a nice middle; only 3/9 random points were genuinely compact without
   hitting an exact threshold. Not yet adopted as the actual per-task config
   default (still ×1 everywhere).
 - `H_full` and `counterfactual_reimagine` still haven't been exercised by any experiment

@@ -311,10 +311,25 @@ timeline visualization.
 **Conclusions:**
 
 1. **`|B_sel| < |B_rank| < |B_margin|` holds on average, on every task** —
-   confirms readme.md §5's expected size ordering comprehensively, not just
-   at one point. Pong is the most extreme case: `H_margin` needs to cover
-   almost the entire 30-step horizon on average (29.7/30) while `H_sel`
-   needs about 1 step.
+   confirms readme.md §5's expected size ordering, but **`H_margin`'s large
+   `B` is mostly degenerate, not a genuinely larger-but-still-compact
+   explanation.** Mean `B_margin` coverage is 99% of the horizon for Pong,
+   92% for Walker Walk, 48% for Crafter — i.e. for Pong/Walker Walk, `H_margin`
+   almost always ends up keeping nearly *everything*. With nearly nothing
+   masked, `J̃ ≈ J` trivially, so `D_sel`/`D_rank`/`D_margin` are all trivially
+   near their best values too — this isn't "evidence found," it's the
+   objective being satisfied by not really masking anything. Root cause:
+   readme.md §6 mandates the *same* regularizer weights (`β_dur=0.01` etc.,
+   `λc=1.0`) across all three objectives for a fair size comparison, but
+   `D_margin` is a relative-error quantity where keeping one more real
+   timestep almost always buys a real, non-negligible improvement — the
+   `β_dur=0.01`-scale cost of covering one more step is far too cheap to stop
+   greedy search before it's covered nearly all of `T`. See "Regularizer
+   strength vs. `H_margin` compactness" below for how sensitive this is to
+   the regularizer weights. Crafter's lower average (48%) shows this isn't
+   universal — the failure mode is specific to how much of Pong's/Walker
+   Walk's return is a *sustained* signal (nothing to gain from masking a
+   sustained trend, so keep it all) vs. Crafter's more localized rewards.
 2. **The three objectives mostly surface different evidence** — median IoU
    is 0.00–0.27 for every pair, on every task. `rank↔margin` is consistently
    the most overlapping pair (0.20–0.38 median) — plausible since `H_margin`
@@ -328,9 +343,12 @@ timeline visualization.
    the fill × objective grid above almost exactly (80%/83%/94% non-empty ⟺
    20%/17%/6% empty), a good cross-check between the two experiments.
 
-**Single-point case study** (reference decision point, `experiments/cross_objective_agreement.py`):
+**Single-point case study** (reference decision point, `experiments/cross_objective_agreement.py`).
+**Caveat confirmed directly: `B_margin` covers 100% of the 30-step horizon
+(0–29) at all three points below** — a clean illustration of conclusion 1,
+not three genuinely-informative margin explanations.
 
-| Task | `B_sel` | `B_rank` | `B_margin` |
+| Task | `B_sel` | `B_rank` | `B_margin` (covers 30/30 in all 3 cases) |
 |---|---|---|---|
 | Crafter | `[(29,29)]` | `[(15,16),(17,20)]` | `[(0,7),(8,15),(15,22),(22,29)]` |
 | Atari Pong | `[(7,7)]` | `[(7,7)]` | `[(0,0),(1,8),(9,16),(14,21),(22,29)]` |
@@ -344,6 +362,45 @@ Walker Walk's `B_sel` happens to be empty at this specific reference point
 (one of its 6/35 empty cases) — not a useful point for an `H_sel` case study
 on this task; a different point from the 35-point sweep should be picked if
 one is needed for a write-up figure.
+
+### Regularizer strength vs. `H_margin` compactness
+
+Follow-up to the near-full-horizon `B_margin` finding above: does simply
+strengthening the regularizer (readme.md §6's `β_dur/β_num/β_sep/β_dyn`,
+scaled together by a multiplier — equivalent to scaling `λc`, since `R(B)` is
+linear in the betas) recover a compact `B_margin`?
+`experiments/margin_regularizer_sweep.py`, `global_prior` fill, all 35 points
+per task, mean coverage (of `T=30`) and mean `D_margin` at the search's final
+`B`, per multiplier:
+
+| Multiplier | Crafter cov / D_margin | Pong cov / D_margin | Walker Walk cov / D_margin |
+|---|---|---|---|
+| ×1 (baseline) | 14.4/30 / 0.43 | 29.7/30 / 0.00 | 27.7/30 / 0.03 |
+| ×3 | 13.0/30 / 0.51 | 29.8/30 / 0.00 | 27.8/30 / 0.03 |
+| ×10 | 1.1/30 / 1.06 | 7.7/30 / 0.85 | 3.8/30 / 0.94 |
+| ×30 | 0/30 / 1.14 | 0/30 / 1.14 | 0/30 / 1.14 |
+| ×100 | 0/30 / 1.14 | 0/30 / 1.14 | 0/30 / 1.14 |
+
+(`D_margin=1.14` at ×30/×100 is exactly the `B=∅` baseline value — the
+regularizer has become strong enough that greedy search never adds anything.)
+
+**Conclusion: no — there is no smooth middle ground, only a cliff.** Between
+×1 and ×3, essentially nothing changes. Between ×3 and ×10, coverage
+collapses from ~90%+ to single digits and `D_margin` jumps most of the way to
+its worst-case value. By ×30, search always lands on `B=∅`. **Simply
+reweighting the existing regularizer doesn't trade compactness for
+faithfulness smoothly — it flips between "keep nearly everything" and "keep
+nearly nothing," with no multiplier tested giving a genuinely compact
+*and* reasonably faithful `B_margin`.** This suggests the problem isn't just
+a badly-tuned constant: `D_margin` (avg. relative error across all candidate
+pairs) appears to be highly sensitive to *any* substantially-sized masked
+region, without a graceful degradation in between — a structural property of
+the metric, not something a linear regularizer on segment count/duration can
+fix. A different compactness mechanism (e.g. a hard `max_size` budget with
+`D_margin` reported as-is rather than driving it to near-zero, or a
+differently-shaped `D_margin` less sensitive to small pairwise changes) would
+need to be tried to get a genuinely compact `H_margin` explanation; not done
+today.
 
 ### Open items (updated)
 
@@ -361,6 +418,12 @@ one is needed for a write-up figure.
 - ~~`cross_baseline_agreement.py`'s heatmap hasn't been re-run against the new
   reference points / `global_prior`~~ — **resolved**, see "Cross-baseline
   agreement" above.
+- **New**: `H_margin`'s large `B` is mostly degenerate (near-full-horizon
+  coverage, especially Pong/Walker Walk) rather than a genuinely compact
+  explanation, and reweighting the shared regularizer doesn't fix it — see
+  "Regularizer strength vs. `H_margin` compactness" above. Needs a different
+  compactness mechanism (hard `max_size` budget, or a less pair-sensitive
+  `D_margin`) to produce a usable `H_margin` explanation; not resolved.
 - `H_full` and `counterfactual_reimagine` still haven't been exercised by any experiment
   script.
 - The §8 cost-accounting experiment hasn't been re-run against the new

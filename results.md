@@ -368,39 +368,47 @@ one is needed for a write-up figure.
 Follow-up to the near-full-horizon `B_margin` finding above: does simply
 strengthening the regularizer (readme.md §6's `β_dur/β_num/β_sep/β_dyn`,
 scaled together by a multiplier — equivalent to scaling `λc`, since `R(B)` is
-linear in the betas) recover a compact `B_margin`?
-`experiments/margin_regularizer_sweep.py`, `global_prior` fill, all 35 points
-per task, mean coverage (of `T=30`) and mean `D_margin` at the search's final
-`B`, per multiplier:
+linear in the betas) recover a compact `B_margin`? First tried a coarse
+multiplier grid (1/3/10/30/100) and initially concluded there was no middle
+ground, only a cliff between ×3 and ×10 — that conclusion turned out to be
+an artifact of the coarse spacing skipping over the transition. Re-ran with a
+finer grid (1–20) and **evaluated each task independently rather than
+assuming one multiplier has to work for all three** — the transition point is
+genuinely different per task. Mean coverage (of `T=30`) / mean `D_margin` at
+the search's final `B`, `global_prior` fill, all 35 points per task:
 
 | Multiplier | Crafter cov / D_margin | Pong cov / D_margin | Walker Walk cov / D_margin |
 |---|---|---|---|
-| ×1 (baseline) | 14.4/30 / 0.43 | 29.7/30 / 0.00 | 27.7/30 / 0.03 |
-| ×3 | 13.0/30 / 0.51 | 29.8/30 / 0.00 | 27.8/30 / 0.03 |
-| ×10 | 1.1/30 / 1.06 | 7.7/30 / 0.85 | 3.8/30 / 0.94 |
-| ×30 | 0/30 / 1.14 | 0/30 / 1.14 | 0/30 / 1.14 |
-| ×100 | 0/30 / 1.14 | 0/30 / 1.14 | 0/30 / 1.14 |
+| ×1 (baseline) | 14.8/30 / 0.40 | 29.7/30 / 0.00 | 27.7/30 / 0.03 |
+| ×3 | 13.1/30 / 0.49 | 29.8/30 / 0.00 | 27.8/30 / 0.03 |
+| ×5 | 12.7/30 / 0.52 | 29.9/30 / 0.00 | 21.5/30 / 0.25 |
+| ×7 | 6.3/30 / 0.78 | 27.3/30 / 0.10 | 13.8/30 / 0.55 |
+| ×9 | 2.4/30 / 0.98 | 15.3/30 / 0.56 | 4.3/30 / 0.92 |
+| ×12 | 0.0/30 / 1.14 | 2.6/30 / 1.05 | 2.5/30 / 0.99 |
+| ×15–20 | 0.0/30 / 1.14 | 0.0/30 / 1.14 | 0.0–1.1/30 / 1.06–1.14 |
 
-(`D_margin=1.14` at ×30/×100 is exactly the `B=∅` baseline value — the
-regularizer has become strong enough that greedy search never adds anything.)
+**Corrected conclusion: there is a real, usable middle ground — the earlier
+"cliff" was a sampling artifact, not a property of `D_margin`.** All three
+tasks show a genuine gradual decline, not a step function. But **the
+transition happens at a different multiplier for each task, so a shared
+multiplier across tasks isn't the right framing** (readme.md §6's
+"same weights for a fair comparison" applies to comparing `H_sel`/`H_rank`/
+`H_margin` *within* a task, not to reusing one `H_margin` compactness setting
+*across* tasks):
 
-**Conclusion: no — there is no smooth middle ground, only a cliff.** Between
-×1 and ×3, essentially nothing changes. Between ×3 and ×10, coverage
-collapses from ~90%+ to single digits and `D_margin` jumps most of the way to
-its worst-case value. By ×30, search always lands on `B=∅`. **Simply
-reweighting the existing regularizer doesn't trade compactness for
-faithfulness smoothly — it flips between "keep nearly everything" and "keep
-nearly nothing," with no multiplier tested giving a genuinely compact
-*and* reasonably faithful `B_margin`.** This suggests the problem isn't just
-a badly-tuned constant: `D_margin` (avg. relative error across all candidate
-pairs) appears to be highly sensitive to *any* substantially-sized masked
-region, without a graceful degradation in between — a structural property of
-the metric, not something a linear regularizer on segment count/duration can
-fix. A different compactness mechanism (e.g. a hard `max_size` budget with
-`D_margin` reported as-is rather than driving it to near-zero, or a
-differently-shaped `D_margin` less sensitive to small pairwise changes) would
-need to be tried to get a genuinely compact `H_margin` explanation; not done
-today.
+- **Pong needs the strongest push**: completely flat from ×1–×6 (the default
+  weights are simply too weak to register at all), only starts declining at
+  ×7, reaching a moderate compactness/faithfulness point around ×8–9
+  (24→15 out of 30 covered, `D_margin` 0.23→0.56).
+- **Crafter and Walker Walk respond earlier and more smoothly**, with a
+  usable middle ground around ×5–×7 (Crafter: 6–13 of 30 covered, `D_margin`
+  0.49–0.78; Walker Walk: 14–22 of 30, `D_margin` 0.25–0.55).
+
+**Practical takeaway**: a per-task regularizer multiplier (roughly ×5–7 for
+Crafter/Walker Walk, ×8–9 for Pong) gives a genuinely more compact `B_margin`
+at a moderate, non-catastrophic `D_margin` cost — worth adopting per-task if
+`H_margin` explanations are needed for a write-up, rather than the shared ×1
+weights that currently make it degenerate to near-full-horizon coverage.
 
 ### Open items (updated)
 
@@ -418,12 +426,14 @@ today.
 - ~~`cross_baseline_agreement.py`'s heatmap hasn't been re-run against the new
   reference points / `global_prior`~~ — **resolved**, see "Cross-baseline
   agreement" above.
-- **New**: `H_margin`'s large `B` is mostly degenerate (near-full-horizon
-  coverage, especially Pong/Walker Walk) rather than a genuinely compact
-  explanation, and reweighting the shared regularizer doesn't fix it — see
-  "Regularizer strength vs. `H_margin` compactness" above. Needs a different
-  compactness mechanism (hard `max_size` budget, or a less pair-sensitive
-  `D_margin`) to produce a usable `H_margin` explanation; not resolved.
+- ~~`H_margin`'s large `B` is mostly degenerate (near-full-horizon coverage,
+  especially Pong/Walker Walk) with the shared (×1) regularizer weights~~ —
+  **resolved**: a per-task regularizer multiplier (×5–7 for Crafter/Walker
+  Walk, ×8–9 for Pong) recovers a genuinely compact `B_margin` at a moderate
+  `D_margin` cost — see "Regularizer strength vs. `H_margin` compactness"
+  above. Not yet adopted as the actual per-task config default (still ×1
+  everywhere) — worth doing if `H_margin` explanations are needed for a
+  write-up.
 - `H_full` and `counterfactual_reimagine` still haven't been exercised by any experiment
   script.
 - The §8 cost-accounting experiment hasn't been re-run against the new

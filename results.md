@@ -410,6 +410,44 @@ at a moderate, non-catastrophic `D_margin` cost — worth adopting per-task if
 `H_margin` explanations are needed for a write-up, rather than the shared ×1
 weights that currently make it degenerate to near-full-horizon coverage.
 
+### Case study with the tuned multiplier (population-derived, not re-tuned per point)
+
+Applying the multiplier found above (Crafter/Walker Walk ×6, Pong ×9 — picked
+from the 35-point population sweep, not fit to any single point) to each
+task's reference decision point (`experiments/cross_objective_agreement.py
+--margin-multiplier`), run solo/sequentially (not concurrently, since we're
+now operating right at an individual point's own compactness/faithfulness
+threshold, where the earlier-documented concurrency numerical drift is more
+likely to flip a discrete outcome than just nudge a continuous number):
+
+| Task | `B_sel` | `B_rank` | `B_margin` @ tuned multiplier |
+|---|---|---|---|
+| Crafter (×6) | `[(24,25),(26,29)]` | `[(14,14)]` | still 30/30 (full) |
+| Atari Pong (×9) | `[(6,6)]` | `[(0,1)]` | still 30/30 (full) |
+| DMC Walker Walk (×6) | `[]` | `[(28,29)]` | 0/30 (empty) |
+
+Images: `images/{crafter,atari_pong,dmc_walker_walk}/cross_objective_agreement_tuned_margin.png`.
+
+**Honest result, not cherry-picked: the population-tuned multiplier does not
+transfer cleanly to these specific reference points.** Crafter and Pong are
+still at full coverage at their tuned multiplier (their own individual
+threshold, checked directly, sits higher — between ×6–7 for Crafter, ×12–15
+for Pong); Walker Walk has already flipped to empty (its own threshold sits
+below ×6). This is not a failure of the method so much as a property of
+*which* points these reference points are: they were selected as the most
+*decisive* points (largest candidate-score separation, from the multi-point
+sampling sweep), and a per-point check found each individual point's
+coverage-vs-multiplier curve is a **sharp step, not a gradual one** — the
+smooth-looking population-average curve above is the average of many
+individually-sharp steps that happen to sit at different multiplier
+thresholds, not evidence that any single point degrades gradually. A
+population-tuned multiplier is the right generalizable choice (matches how
+these configs should actually be set), but it will still land some
+individual points, especially atypical high-separation ones like these
+reference points, right on the wrong side of their own threshold — that's
+expected, not a bug, and not a reason to hunt for a point-specific multiplier
+(which would just overfit to that one point with no generalization value).
+
 ### Open items (updated)
 
 - ~~Decision-point sampling isn't reproducible run-to-run~~ — **resolved**.

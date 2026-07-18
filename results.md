@@ -593,6 +593,39 @@ exhibited it, so the regularizer-tuning investigation done for `H_margin`
 doesn't need to be repeated for them — increasing their regularizer weight
 would only shrink an already-small `B`, not fix a degeneracy that isn't there.
 
+**Is `H_sel`/`H_rank`'s `B` also bimodal (only ever ~0 or ~30), the way
+`H_margin` was for Pong?** Checked the actual per-point coverage
+distribution (buckets of 5, out of 35 points, at ×1) behind the means
+above, not just the means — the answer is no, that pattern is specific to
+`H_margin`, not a general property:
+
+| Fill / objective | Crafter | Atari Pong | Walker Walk |
+|---|---|---|---|
+| self_mean / sel | 21/8/3/3/0/0 | **35**/0/0/0/0/0 | 32/2/1/0/0/0 |
+| self_mean / rank | 13/7/6/4/0/5 | 33/1/1/0/0/0 | 29/4/2/0/0/0 |
+| zero / rank | 2/3/11/3/3/13 | 33/1/1/0/0/0 | 18/8/4/5/0/0 |
+| global_prior / rank | 15/8/4/3/0/5 | 32/3/0/0/0/0 | 9/13/4/5/1/3 |
+
+(buckets: 0–4 / 5–9 / 10–14 / 15–19 / 20–24 / 25–30; full 12-combo breakdown
+in `experiments/out/*_regularizer_grid_SOLO.log`)
+
+- **Crafter is genuinely spread, not bimodal**: e.g. `zero`+`H_rank` has real
+  mass in *every* bucket (2/3/11/3/3/13) — a middle-heavy distribution with
+  some points also fully covered, not a full/empty split.
+- **Pong is unimodal at the low end, not bimodal**: e.g. `self_mean`+`H_sel`
+  has literally all 35 points in the 0–4 bucket — everything stays small,
+  there's no cluster of full-coverage points to be bimodal *against*. This
+  is different from Pong's `H_margin` behavior (which really was full-vs-
+  empty bimodal) and consistent with Pong's decisions being uniformly
+  low-stakes (established earlier) rather than "some decisive, some not."
+- **Walker Walk is in between**: mostly concentrated low like Pong, but with
+  more genuine spread into middle/high buckets, especially for `H_rank`.
+
+So the `H_margin`-specific "only ever full or empty" pattern found for Pong
+does not generalize to `H_sel`/`H_rank` — it's tied to what makes `D_margin`
+uniquely sensitive to masking (readme.md §3), not a property of the search
+or the task in general.
+
 **A second, much bigger finding came out of running this grid, which
 supersedes earlier, narrower concurrency notes in this doc**: to sanity-check
 whether concurrent GPU execution was safe for this broader grid, ran it once

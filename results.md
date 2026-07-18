@@ -448,6 +448,66 @@ reference points, right on the wrong side of their own threshold — that's
 expected, not a bug, and not a reason to hunt for a point-specific multiplier
 (which would just overfit to that one point with no generalization value).
 
+**Verified directly** (Crafter, ×6, coverage per individual point across the
+35-point sweep, not just the mean): the distribution is right-skewed, not
+clustered near the mean — 22/35 points already have coverage ≤5, only 4/35
+are still fully covered (30/30), and the rest (9/35) fall genuinely in
+between (4–16). The population mean (~6–10, depending on the exact sample)
+is an average over this skewed mix, not a typical single point's value. The
+top-2 points by `J` range are `(seed=3,step=25)`: cov=30 (our reference
+point) and `(seed=3,step=30)`: cov=0 — so higher decisiveness correlates with
+a higher individual threshold on average, but not perfectly monotonically;
+our reference point specifically landed on the still-full side of that
+tendency.
+
+### Case study with a randomly-selected point, not the max-`J`-range one
+
+The reference points used everywhere above (and picked by "largest `J`
+range" back in the first multi-point sweep) are a biased choice for a case
+study specifically *because* of the finding just above — deliberately
+picking the most decisive point also tends to pick a point with an
+atypically high margin-compactness threshold. "Largest `J` range" was the
+right criterion for its original purpose (showing a task isn't degenerate),
+but not for "what does a representative explanation look like." Redid the
+case study with one point drawn genuinely at random per task (Python's
+`random`, OS entropy, no cherry-picking): Crafter `seed=3,step=10`, Pong
+`seed=4,step=15`, Walker Walk `seed=3,step=20`.
+
+| Task | `B_sel` | `B_rank` | `B_margin` @ ×1 | `B_margin` @ tuned multiplier |
+|---|---|---|---|---|
+| Crafter | `[(0,3),(4,4)]` | `[(4,4)]` | 10/30 (compact already) | *(not needed)* |
+| Atari Pong | `[(29,29)]` | `[(11,11)]` | 30/30 (full) | 0/30 (empty, ×9) |
+| DMC Walker Walk | `[(28,29)]` | `[(0,7),(6,9),(20,27)]` | 30/30 (full) | 13/30 (×6) |
+
+Images: `images/{crafter,atari_pong,dmc_walker_walk}/cross_objective_agreement_random{,_tuned}.png`.
+
+**This is a more honest, representative picture than the max-`J`-range case
+study:**
+
+1. **Crafter's random point is already compact at the default (×1) weights**
+   — `B_margin` covers only 10/30 steps, split across two segments, no
+   tuning needed at all. The earlier max-range point (always full at ×1) was
+   the atypical case, not this one.
+2. **Pong and Walker Walk's random points are still full at ×1** — expected,
+   since their population means (99%/92%) say *most* points are still full
+   by default; a random draw landing on "still full" is the likely outcome,
+   not a coincidence.
+3. **Applying the tuned multiplier gives genuinely different outcomes even on
+   these more-representative points**: Walker Walk's random point becomes
+   nicely compact (13/30, segments spread across the early-to-mid horizon —
+   see the timeline image) — the tuning works as intended here. Pong's
+   random point instead overshoots straight to empty (0/30) — no
+   intermediate value, consistent with individual points behaving as sharp
+   steps rather than responding gradually to the multiplier.
+
+**Overall, calibrated takeaway**: a per-task tuned multiplier is a real
+improvement on average and sometimes gives a genuinely compact, interpretable
+`B_margin` on a representative point (Crafter needed no tuning; Walker Walk's
+random point tuned well) — but it is not a guaranteed fix for any given
+point, since individual points threshold sharply and Pong's random point
+still overshot to empty. `H_margin` explanations should be reported with this
+caveat, not presented as reliably compact.
+
 ### Open items (updated)
 
 - ~~Decision-point sampling isn't reproducible run-to-run~~ — **resolved**.
@@ -466,12 +526,15 @@ expected, not a bug, and not a reason to hunt for a point-specific multiplier
   agreement" above.
 - ~~`H_margin`'s large `B` is mostly degenerate (near-full-horizon coverage,
   especially Pong/Walker Walk) with the shared (×1) regularizer weights~~ —
-  **resolved**: a per-task regularizer multiplier (×5–7 for Crafter/Walker
-  Walk, ×8–9 for Pong) recovers a genuinely compact `B_margin` at a moderate
-  `D_margin` cost — see "Regularizer strength vs. `H_margin` compactness"
-  above. Not yet adopted as the actual per-task config default (still ×1
-  everywhere) — worth doing if `H_margin` explanations are needed for a
-  write-up.
+  **partially resolved**: a per-task regularizer multiplier (×5–7 for
+  Crafter/Walker Walk, ×8–9 for Pong) recovers a genuinely compact
+  `B_margin` *on average* — see "Regularizer strength vs. `H_margin`
+  compactness" and the two case-study sections above. **Caveat**: not a
+  guaranteed per-point fix — individual points threshold sharply, so the
+  tuned multiplier can still land a specific point on the wrong side (full
+  or empty) rather than a nice middle; confirmed on both the max-`J`-range
+  and a genuinely random point per task. Not yet adopted as the actual
+  per-task config default (still ×1 everywhere).
 - `H_full` and `counterfactual_reimagine` still haven't been exercised by any experiment
   script.
 - The §8 cost-accounting experiment hasn't been re-run against the new

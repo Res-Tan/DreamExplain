@@ -34,10 +34,17 @@
 - **Disk note**: `/home` is at 98% capacity (5.7T/5.9T used, ~179G free) as of
   2026-07-14 — be mindful of checkpoint/log growth when running new training or
   large diagnostic sweeps (§8).
-- **Tip**: running multiple tasks concurrently across GPUs can cause tiny
-  numerical drift in results (results.md 2026-07-17) — negligible for
-  aggregate conclusions, use concurrent GPUs freely; only worth re-running a
-  task solo if a specific cited number needs to match exactly.
+- **Do not run multiple tasks concurrently across GPUs for this method,
+  ever** (results.md 2026-07-17). Originally thought to be a small, ignorable
+  drift affecting only Crafter, but a broader check found it affects **all
+  three tasks, across every fill/objective combination tested** — sometimes
+  by a small amount, sometimes enough to change a qualitative conclusion
+  (e.g. flipping a `B` between full-horizon and empty right at a
+  regularizer threshold). One task per GPU running at the same wall-clock
+  time as another task is the trigger, regardless of which physical GPUs are
+  involved (each process is already pinned to its own GPU). Always run
+  `worldmodel_explain` experiments one task at a time, fully sequentially —
+  there is no confirmed-safe case for concurrency with this codebase.
 - **No sync step needed anymore**: since code, `dreamerv3/`, and `models/` are
   all local on `matsutake`, the old rsync/scp pull-back-to-Mac step is gone.
   The explanation method (rollout, masking, search, diagnostic experiments in

@@ -142,6 +142,14 @@ the most expensive (more segments end up retained → more evals before greedy s
 seeded and verified reproducible — the same `(seed, step)` always yields the
 same imagined rollout and `J`, for all three tasks.*
 
+*Tip: never run more than one task's `worldmodel_explain` experiment at the
+same wall-clock time, even across separate GPUs. First thought to be a small,
+Crafter-only, mostly-ignorable drift; a later, broader check (see "Regularizer
+strength vs. `H_margin` compactness" and the concurrency check further down)
+found it affects all three tasks across every fill/objective combination
+tested, sometimes enough to flip a qualitative conclusion. Always run
+sequentially — see readme.md §0.*
+
 ### Multi-point sampling sweep (`fill=self_mean`, `objective=H_sel`, 35 points/task)
 
 5 env seeds × 7 steps (1/5/10/15/20/25/30) = 35 decision points per task.
@@ -535,7 +543,72 @@ examples found so far if a compact case is needed for a write-up.
 near a threshold must run solo/sequentially from the start — this isn't
 optional caution, it's what this exact re-run just demonstrated: concurrent
 GPU noise was large enough here to fabricate a "non-monotonic" finding out of
-thin air and to misreport one point's coverage by more than 2x.
+thin air and to misreport one point's coverage by more than 2x. (Superseded
+by an even broader finding below — this isn't specific to margin or to
+thresholds.)
+
+### Do `H_sel`/`H_rank` need the same regularizer treatment as `H_margin`? And does it hold across all fills?
+
+Extended the regularizer-multiplier × distribution analysis from `H_margin`
+only to all 4 fills × 3 objectives (`experiments/regularizer_grid_sweep.py`,
+35 points/task, solo/sequential — see the concurrency finding below for why
+solo was non-negotiable here). Mean `B` coverage (of `T=30`) at the
+**baseline ×1 weights**, no tuning:
+
+**Crafter**
+
+| fill | H_sel | H_rank | H_margin |
+|---|---|---|---|
+| self_mean | 4.3 | 10.1 | 11.4 |
+| shuffle | 1.5 | 6.7 | 20.0 |
+| zero | 8.8 | 19.4 | 19.9 |
+| global_prior | 4.1 | 9.3 | 14.4 |
+
+**Atari Pong**
+
+| fill | H_sel | H_rank | H_margin |
+|---|---|---|---|
+| self_mean | 0.3 | 1.1 | 4.6 |
+| shuffle | 0.8 | 3.7 | 23.7 |
+| zero | 0.3 | 1.1 | 4.6 |
+| global_prior | 1.1 | 2.1 | 29.8 |
+
+**DMC Walker Walk**
+
+| fill | H_sel | H_rank | H_margin |
+|---|---|---|---|
+| self_mean | 1.0 | 1.7 | 5.0 |
+| shuffle | 1.8 | 6.6 | 18.5 |
+| zero | 3.4 | 5.7 | 16.2 |
+| global_prior | 3.3 | 10.5 | 27.7 |
+
+**Answer: no, `H_sel`/`H_rank` don't need it — they're already compact at the
+default weights, for every fill and every task.** `H_margin` is consistently
+the largest by a wide margin (pun noted), confirming the
+`|B_sel| < |B_rank| < |B_margin|` ordering holds in raw size, not just
+non-empty rate, across all 12 fill/objective combinations, not only
+`global_prior`. `H_margin`'s near-full-horizon degeneracy (Pong/Walker Walk
+especially) was a real, `H_margin`-specific problem; `H_sel`/`H_rank` never
+exhibited it, so the regularizer-tuning investigation done for `H_margin`
+doesn't need to be repeated for them — increasing their regularizer weight
+would only shrink an already-small `B`, not fix a degeneracy that isn't there.
+
+**A second, much bigger finding came out of running this grid, which
+supersedes earlier, narrower concurrency notes in this doc**: to sanity-check
+whether concurrent GPU execution was safe for this broader grid, ran it once
+concurrently (3 tasks, 1 GPU each, same wall-clock time) and once
+solo/sequentially, then diffed every cell. **Every one of the 12 fill ×
+objective combinations differed between the concurrent and solo runs, for
+all three tasks** — not just Crafter, not just `H_margin`, not just points
+near a threshold. Differences ranged from negligible to substantial (e.g.
+Walker Walk `self_mean`+`H_sel` mean coverage: 23.1 concurrent vs. 18.5
+solo). The earlier belief that "Pong and Walker Walk are robust to
+concurrency" was based only on the simple `self_mean`/`global_prior` @ ×1
+sweep from earlier in this doc — it does not generalize to a grid this size.
+**Revised, unconditional rule: never run more than one task's
+`worldmodel_explain` experiment at the same wall-clock time, regardless of
+task, fill, objective, or whether anything looks threshold-sensitive.**
+readme.md §0 updated accordingly.
 
 ### Open items (updated)
 
@@ -572,3 +645,13 @@ thin air and to misreport one point's coverage by more than 2x.
 - `shuffle`'s fill is unseeded (fresh RNG per call, see note above) — low
   priority (doesn't change conclusions) but worth seeding if exact numbers
   need to match run-to-run.
+- ~~Concurrent GPU execution's numerical drift is Crafter-specific / only
+  matters near a regularizer threshold~~ — **superseded, worse than
+  thought**: affects all three tasks across every fill/objective combo
+  tested (see "Do `H_sel`/`H_rank` need the same regularizer treatment"
+  above). Not a bug to fix — the operational rule (never run tasks
+  concurrently) is now unconditional, in readme.md §0.
+- Root cause of the concurrency-induced numerical drift itself (leading
+  guess from 2026-07-17: GPU/host contention changing cuDNN/XLA kernel
+  selection) is still not confirmed — not chased further, since the
+  workaround (never run concurrently) is simple and now well-established.

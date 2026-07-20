@@ -671,8 +671,9 @@ readme.md §0 updated accordingly.
   a nice middle; only 3/9 random points were genuinely compact without
   hitting an exact threshold. Not yet adopted as the actual per-task config
   default (still ×1 everywhere).
-- `H_full` and `counterfactual_reimagine` still haven't been exercised by any experiment
-  script.
+- ~~`H_full` and `counterfactual_reimagine` still haven't been exercised by any
+  experiment script~~ -- **`counterfactual_reimagine` resolved**, see
+  "2026-07-20" below. `H_full` still not exercised.
 - The §8 cost-accounting experiment hasn't been re-run against the new
   reference points / `global_prior` yet.
 - `shuffle`'s fill is unseeded (fresh RNG per call, see note above) — low
@@ -688,3 +689,105 @@ readme.md §0 updated accordingly.
   guess from 2026-07-17: GPU/host contention changing cuDNN/XLA kernel
   selection) is still not confirmed — not chased further, since the
   workaround (never run concurrently) is simple and now well-established.
+
+---
+
+## 2026-07-20
+
+### `counterfactual_reimagine` exercised for the first time (readme.md §3/§8)
+
+`masking.counterfactual_reimagine` was implemented earlier but had never
+actually been run by any `experiments/*.py` script (both readme.md §8.2 and
+the open items above flagged this). Added
+`experiments/counterfactual_case_study.py`: rather than running full greedy
+search under this fill (readme.md §3's "most expensive... not full search" --
+`search.greedy_forward_selection` would call it once per candidate segment at
+every step, and each distinct masked-run length triggers a fresh JIT compile
+inside `dyn.imagine`, since length is baked in as a static shape), it runs the
+config's cheap default fill's search *once* to get the same reference `B` the
+main-line results already report, then evaluates only `B=∅` and that fixed
+`B_ref` under every fill including `counterfactual_reimagine` -- O(1)
+`dyn.imagine` calls instead of O(|pool|²).
+
+**Two latent bugs surfaced immediately on first use** (exactly the kind of
+thing "never exercised by any script" predicts):
+
+1. `branch_carry`'s `put` helper called `np.asarray(x)` unconditionally
+   before `device_put`. For the `start==0` branch, `x` is the live
+   `dyn_carry` (already a `jax.Array` on-device), so this forced an explicit
+   device-to-host read and tripped the project-wide
+   `jax_transfer_guard='disallow'` ("Disallowed device-to-host transfer") --
+   the same class of guard `rollout.to_numpy` already has to work around
+   for a different call site. Fixed by only routing through `np.asarray`
+   when `x` isn't already a `jax.Array`.
+2. `branch_carry(start=0)` passed `dyn_carry` -- batch size 1, the single
+   `h0` belief state -- straight into `dyn.imagine` without tiling it to `N`
+   candidates first, unlike `rollout._rollout_impl`'s own `_tile(dyn_carry,
+   n)` for the main (non-counterfactual) rollout. Caused a concatenate shape
+   mismatch inside `dreamerv3/rssm.py`'s `_core` (`(1,1024)` vs `(8,1024)`)
+   the moment a masked run started at `t=0`. Fixed by tiling to `N` via
+   `rollout._tile` before `device_put`.
+
+Both fixed in `masking.py`; see comments there for detail.
+
+### Case studies, all 3 tasks (sequential, one GPU, per §0)
+
+`B_ref` found by `global_prior` + `H_sel` (the task configs' actual default),
+`B=∅` as the no-evidence-retained anchor. Reference points: Crafter
+(seed=3, step=25, the usual reference point), Pong (seed=2, step=30, its
+usual reference point -- `B_ref=[(7,7)]` matches the single-point case study
+from 2026-07-17 exactly), Walker Walk (seed=0, step=5 -- its *usual*
+reference point, seed=0/step=25, is the documented degenerate `H_sel` case
+from 2026-07-17, so this non-degenerate point from the 35-point sweep was
+used instead, same substitution `cross_baseline_agreement.py` already made).
+
+| Task | `B_ref` | `D_sel`/`D_rank`/`D_margin` @ `B=∅` | @ `B_ref` | `counterfactual_reimagine` cost |
+|---|---|---|---|---|
+| Crafter | `[(29,29)]`, 1/30 | 1.000 / 0.571 / 1.190 | 0.000 / 0.357 / 1.115 | 2.48s (∅) / 2.66s (`B_ref`) |
+| Atari Pong | `[(7,7)]`, 1/30 | 1.000 / 0.250 / 1.106 | 0.000 / 0.250 / 0.540 | 2.42s (∅) / 4.70s (`B_ref`) |
+| DMC Walker Walk | `[(25,29)]`, 5/30 | 1.000 / 0.393 / 1.937 | 1.000 / 0.643 / 2.135 | 2.33s (∅) / 2.20s (`B_ref`) |
+
+(Full per-fill breakdown, including `self_mean`/`shuffle`/`zero`/`global_prior`
+at both `B`'s, in `experiments/out/<task>/counterfactual_case_study.log`.)
+
+Timeline plots (original vs. every fill's reconstruction of the top candidate's
+`rhat`/`uhat`, masked region shaded) in
+`images/<task>/counterfactual_case_study.png`.
+
+**Qualitative conclusions** (the actual point of this experiment, per readme.md
+§3's "avoids OOD inputs to `G`" rationale -- `D`-metric numbers above are a
+side effect, not the goal, since a single fixed `B` on one point was never
+meant to be a search-quality comparison):
+
+- **Walker Walk is the clearest illustration**: under the no-op default
+  action, `counterfactual_reimagine`'s reconstructed value trace *falls* from
+  ~320 to ~298 over the masked region, tracking what looks like a
+  genuinely different but physically coherent alternative (the walker
+  losing momentum without the actual policy's action) -- the static fills
+  (`self_mean`/`global_prior`/`zero`) all just hold a constant near the
+  original's neighborhood instead, which is the self-referential/OOD failure
+  mode readme.md §3 describes: a flat imputed number can't represent "this
+  alternative genuinely diverges."
+- **Pong**: `counterfactual_reimagine`'s value trace stays close to the
+  original's smooth upward trend, unlike `global_prior`'s fill which visibly
+  drifts off-trend -- consistent with Pong's low-decisiveness story (2026-07-17):
+  the no-op action doesn't change much because the decision itself barely
+  matters here.
+- **Crafter**: `counterfactual_reimagine` produces a materially lower,
+  independently-varying value trajectory than the actual-action rollout
+  (which has a sharp reward spike near the end that the no-op branch never
+  reproduces) -- again a *different, structured* alternative, not a flat
+  baseline.
+- **Cost**: 2.2-4.7s per `masked_Y` call (a handful of `dyn.imagine` calls,
+  each with its own JIT compile for that masked-run length) vs. ~0.00s for
+  every other fill -- confirms readme.md §3's "most expensive" framing and
+  why it's excluded from `search.greedy_forward_selection`'s main sweep
+  (§7 would call this once per candidate segment at *every* greedy step,
+  i.e. hundreds of these compiles, not a handful).
+
+### Open items (updated)
+
+- ~~`counterfactual_reimagine` still hasn't been exercised by any experiment
+  script~~ -- **resolved**, see above (two latent bugs fixed in `masking.py`
+  along the way).
+- `H_full` still hasn't been exercised by any experiment script.

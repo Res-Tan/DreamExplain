@@ -270,7 +270,10 @@ validate the approach itself:
    fills × 3 objectives × 35 points/task (`fill_objective_sweep.py`), plus the
    single-point heatmap (`cross_baseline_agreement.py`, now with `--seed`/
    `--warmup-steps` to target a specific point) — see results.md 2026-07-17.
-   `counterfactual_reimagine` still not exercised by either.
+   `counterfactual_reimagine` is intentionally excluded from both (too
+   expensive for a full search/sweep, §3) — exercised instead via a separate,
+   fixed-`B` case-study script, `counterfactual_case_study.py` — see
+   results.md 2026-07-20.
 3. **Cross-objective agreement**: compare `B_sel` vs `B_rank` vs `B_margin` (same
    fill strategy) — Jaccard similarity + visualization of segment positions along
    the T-step horizon. **Done**, both as a 35-point/task aggregate
@@ -292,7 +295,8 @@ main sweep. Instead:
 - Robustness ablation: all fill strategies × `H_sel` only (cheapest objective),
   smaller subset of instances, to show conclusions are robust to baseline choice.
 - `counterfactual_reimagine`: a handful of qualitative case studies only (too
-  expensive for the full sweep).
+  expensive for the full sweep). **Done**, see `counterfactual_case_study.py`
+  and results.md 2026-07-20 (one point per task, all 3 tasks).
 
 ---
 
@@ -356,6 +360,9 @@ worldmodel_explain/
     sample_decision_points.py              # multi-(seed,step) sweep, ranks by J range
     fill_objective_sweep.py                # fill x objective grid over N points/task
     build_global_prior.py                  # offline precompute for masking.global_prior
+    counterfactual_case_study.py           # exercises masking.counterfactual_reimagine on a
+                                            # single fixed B (not full search, §3/§8) --
+                                            # see results.md 2026-07-20
   priors/<task>/prior.npz    # output of build_global_prior.py, one per task
   config.yaml              # generic/template config (T, D, β/α weights, fill strategy,
                             # objective variant, N candidates, decision_point seed/step)

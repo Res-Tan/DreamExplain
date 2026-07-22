@@ -785,9 +785,287 @@ meant to be a search-quality comparison):
   (§7 would call this once per candidate segment at *every* greedy step,
   i.e. hundreds of these compiles, not a handful).
 
+**Caveat, addressed below, and an important framing correction**: the above
+is one decision point per task (n=1) -- not enough to generalize. It's also
+tempting to read a disagreement between a cheap fill and
+`counterfactual_reimagine` as "the cheap fill's `B` was wrong, caught out by
+the more faithful method." **That framing is wrong and should not be used.**
+`counterfactual_reimagine` is not a ground truth / answer key here: it
+answers a genuinely different question from `self_mean`/`global_prior`/
+`zero`/`shuffle`. Those four approximate "this information is unknown /
+removed" (a marginalization-style baseline); `counterfactual_reimagine`
+instead substitutes one specific alternative intervention (a fixed no-op
+action), and only for the masked run itself --
+`masking.counterfactual_reimagine`'s own docstring notes it does not
+propagate the counterfactual branch forward past the next kept segment, i.e.
+it doesn't claim to be a fully re-coherent alternative trajectory either. A
+disagreement between it and another fill means what §8.2's
+`cross_baseline_agreement.py` already established for the other four fills:
+**different masking semantics can disagree about whether a given `B` looks
+decision-faithful** -- it is not evidence that either fill is "wrong." At
+this single Walker Walk point, `global_prior`'s own re-scoring of its `B_ref`
+gave `D_sel=0` while `counterfactual_reimagine`'s re-scoring of the *same*
+`B_ref` gave `D_sel=1` -- a real disagreement between two different masking
+semantics, but n=1 isn't enough to say whether that generalizes. See below
+for a 3-points/task follow-up.
+
+### Cross-fill disagreement on a fixed `B_ref`, extending §8.2 to `counterfactual_reimagine` (3 points/task)
+
+Follow-up to the single-point disagreement above. Added
+`experiments/counterfactual_case_study_sweep.py`: reuses the 3
+genuinely-random points per task already drawn for the regularizer-multiplier
+case study ("Case study with randomly-selected points", 2026-07-17 --
+picked via Python's `random`, no cherry-picking) rather than a fresh arbitrary
+sample. n=9 total (3/task) is still far too small for a real statistical
+claim -- this reports a rough "how often do these two masking semantics
+disagree" rate, not a significance test, and (per the correction above) it is
+**not** a test of which fill is correct. One agent load per task
+(`pipeline.points_to_decisions`), so cost stays small (a handful of
+`dyn.imagine` calls per point).
+
+For each point: find `B_ref` with the task's normal search fill
+(`global_prior` + `H_sel`), then re-score that *same* fixed `B_ref` under
+every cheap fill (`self_mean`/`shuffle`/`zero`/`global_prior`) and under
+`counterfactual_reimagine`, and compare pairwise -- not just against the fill
+that found `B_ref`, since that comparison is free once
+`counterfactual_reimagine` has been run once per point (same `Y_tilde`'s, no
+extra GPU calls). `disagreement_rate` = fraction of the 3 points where
+`D_sel` differs between the cheap fill's re-scoring and
+`counterfactual_reimagine`'s; `mean Δrank`/`mean Δmargin` = mean
+(`counterfactual_reimagine`'s `D_rank`/`D_margin` − the cheap fill's) -- the
+sign only says which of the two masking semantics happens to look more/less
+faithful on this particular `B`/point, **not** which one is right.
+
+| Task | fill | disagreement_rate | mean Δrank | mean Δmargin |
+|---|---|---|---|---|
+| Crafter | self_mean | 33% | 0.036 | −1.124 |
+| Crafter | shuffle | 67% | 0.071 | −1.375 |
+| Crafter | zero | 0% | −0.119 | −1.517 |
+| Crafter | global_prior | 67% | −0.345 | −0.156 |
+| Atari Pong | self_mean | 67% | 0.310 | 1.021 |
+| Atari Pong | shuffle | 67% | 0.238 | 0.402 |
+| Atari Pong | zero | 67% | 0.310 | 1.021 |
+| Atari Pong | global_prior | 33% | 0.103 | 0.130 |
+| DMC Walker Walk | self_mean | 100% | 0.488 | 7.081 |
+| DMC Walker Walk | shuffle | 67% | 0.357 | 6.095 |
+| DMC Walker Walk | zero | 67% | 0.405 | 6.653 |
+| DMC Walker Walk | global_prior | 100% | 0.030 | 6.284 |
+
+(Per-point rows in `experiments/out/<task>/counterfactual_case_study_sweep.log`.)
+
+**Conclusions (n=3/task -- directional, not statistically powered, and about
+disagreement between masking semantics, not correctness of either one):**
+
+1. **The single-point Walker Walk disagreement generalizes, and by a wide
+   margin**: every fill's mean `|Δmargin|` on Walker Walk (6.1-7.1) is 4-40x
+   larger than the corresponding fill's on Crafter or Pong (all under 1.6),
+   and 3/4 fills disagree with `counterfactual_reimagine` on `D_sel` on at
+   least 2/3 points (`self_mean`/`global_prior` on all 3). This is now a
+   task-level pattern across 3 independent points -- fill choice matters far
+   more for Walker Walk explanations than for the other two tasks -- not a
+   property of the one point checked above.
+2. **Crafter goes the *opposite* direction**: every fill's mean `Δmargin` on
+   Crafter is *negative* -- `counterfactual_reimagine`'s re-scoring of the
+   same `B_ref` looks *more* faithful there, not less. If
+   `counterfactual_reimagine` were some kind of ground truth that cheap fills
+   either matched or fell short of, you'd expect the sign to point the same
+   way across tasks; it doesn't. That's itself the useful takeaway here:
+   **this is symmetric disagreement between two different masking
+   assumptions, not a one-directional error pattern in the cheap fills.**
+3. **`global_prior` (the recommended default, readme.md §3) happens to be
+   closest to `counterfactual_reimagine`'s re-scoring on 2/3 tasks**: lowest
+   disagreement_rate and smallest \|Δrank\|/\|Δmargin\| on Atari Pong (33%,
+   0.103, 0.130 -- smallest of the 4 fills), and by far the smallest `Δrank`
+   on Walker Walk (0.030 vs 0.36-0.49 for the others), though its `Δmargin`
+   there is still large (the task-level effect from point 1, not
+   fill-specific). Crafter is the exception: `global_prior` has the
+   *largest*-magnitude `Δrank` there (−0.345). Framed carefully: this is weak
+   (n=3) evidence that `global_prior`'s explanations are the most *stable*
+   across masking semantics on this checkpoint set, not evidence that it is
+   the most "correct" -- `counterfactual_reimagine` was never established as
+   the reference to be correct relative to.
+4. **Not a substitute for a real sweep, and not a correctness benchmark even
+   with more points**: 9 points total is enough to show the Walker Walk
+   pattern isn't a one-off and that the sign isn't universal, but not enough
+   to fit a per-task disagreement rate with confidence -- and no amount of
+   points turns this into a "which fill is right" experiment, since there is
+   no ground-truth fill in this design (readme.md §3 lists five *candidate*
+   masking strategies to compare, not four approximations of a fifth, exact
+   one). If this needs to be load-bearing for a write-up, extend
+   `CASE_STUDY_POINTS` (or point selection generally) before trusting the
+   exact percentages above, and keep describing it as cross-fill
+   disagreement, not error.
+
+### Scaling the disagreement sweep to the standard 35-points/task grid
+
+The n=3/task pilot above explicitly flagged its own percentages as
+untrustworthy. `counterfactual_case_study_sweep.py` now defaults to the
+project's standard 35-point grid (5 seeds x 7 steps, matching
+`sample_decision_points.py`/`fill_objective_sweep.py`/
+`cross_objective_agreement_sweep.py`) instead of the original 3
+genuinely-random points/task (kept as `CASE_STUDY_POINTS`, reproducible via
+`--points`) -- same method otherwise: find `B_ref` with the task's normal
+search fill (`global_prior` + `H_sel`), re-score that fixed `B_ref` under
+every cheap fill and under `counterfactual_reimagine`, compare. Same
+"disagreement, not correctness" caveat as above applies throughout --
+`counterfactual_reimagine` is still not a ground truth here.
+
+| Task | fill | disagree_rate | mean Δrank | mean Δmargin |
+|---|---|---|---|---|
+| Crafter | self_mean | 43% | 0.212 | −0.055 |
+| Crafter | shuffle | 46% | 0.168 | −0.570 |
+| Crafter | zero | 26% | 0.012 | −0.475 |
+| Crafter | global_prior | 71% | −0.058 | −0.007 |
+| Atari Pong | self_mean | 54% | 0.243 | 1.166 |
+| Atari Pong | shuffle | 40% | 0.049 | 0.404 |
+| Atari Pong | zero | 54% | 0.243 | 1.166 |
+| Atari Pong | global_prior | 60% | 0.090 | 0.326 |
+| DMC Walker Walk | self_mean | 74% | 0.408 | 11.403 |
+| DMC Walker Walk | shuffle | 46% | 0.261 | 10.805 |
+| DMC Walker Walk | zero | 63% | 0.343 | 11.162 |
+| DMC Walker Walk | global_prior | 80% | 0.079 | 10.769 |
+
+(Per-point rows in `experiments/out/<task>/counterfactual_case_study_sweep_35pt.log`.)
+
+**Conclusions (n=35/task, replaces the n=3 pilot's numbers above -- the n=3
+qualitative shape claims from the section above still stand, only the
+specific percentages there should now be discarded):**
+
+1. **Walker Walk's outsized disagreement is confirmed, not a fluke of 3
+   points, and is even larger at real scale**: mean `|Δmargin|` on Walker
+   Walk (10.7-11.4) is 9-40x every fill's `|Δmargin|` on Crafter (≤0.57) or
+   Pong (≤1.17). This is now a robust task-level pattern across all 35
+   points, not 3.
+2. **Crafter's sign reversal also holds at scale**: every fill's mean
+   `Δmargin` on Crafter stays negative at n=35 (was negative at n=3 too), the
+   only task where this direction holds -- confirms the earlier read that
+   disagreement direction is task-dependent, not fill-dependent, and
+   definitely not evidence of a one-directional "cheap fills are
+   overconfident" effect.
+3. **The n=3 pilot's specific rates were unreliable, exactly as flagged, and
+   in one case the direction of a conclusion flips outright**: the n=3
+   pilot's conclusion #3 ("`global_prior` looks like the most
+   reimagine-robust cheap fill on 2/3 tasks") **does not hold at n=35 and is
+   superseded** -- `global_prior` in fact has the *highest* `disagree_rate`
+   of all four fills on **all three tasks** (71%/60%/80%), not the lowest.
+   This is a clean demonstration of exactly why n=3 wasn't trustworthy for
+   exact rates or fill rankings, and a concrete reminder not to read n=3-level
+   findings in this doc as final without a follow-up sweep.
+4. **Why `global_prior` having the highest disagree_rate does *not* mean
+   "`global_prior` is worse" (reinforcing the disagreement-not-correctness
+   framing)**: `B_ref` is found by searching *with* `global_prior` itself
+   under `H_sel`, so `global_prior`'s own re-scoring of `B_ref` is, by
+   construction, close to whatever `D_sel` the search already drove toward
+   (typically near 0 whenever search succeeds) -- so `global_prior`'s
+   disagree_rate here is essentially measuring how often
+   `counterfactual_reimagine`'s specific no-op-action reconstruction flips
+   the argmax relative to what the *search itself* already decided, not a
+   defect in `global_prior`'s masking semantics relative to the other three
+   fills. The other three fills' `B_ref` re-scoring isn't anchored the same
+   way (they didn't find `B_ref`), so their disagree_rates aren't measuring
+   quite the same thing -- another reason not to rank fills by this number.
+5. **Mean `Δrank` stays small and near zero for every fill on Crafter/Pong**
+   (|0.01-0.24|) but is uniformly larger on Walker Walk (0.08-0.41) -- rank
+   preservation, not just margin, is also where masking-semantics choice
+   matters most for this task.
+
+### Three new fill strategies added: `interpolate`, `candidate_swap`, `retrieval`
+
+Brainstormed beyond readme.md §3's original five (self_mean/global_prior/
+zero/shuffle/counterfactual_reimagine) and implemented in `masking.py`,
+wired into `pipeline.Decision` and every `experiments/*.py` `FILLS` dict.
+readme.md §3's table now documents all three; `config.yaml`'s
+`masking.fill` comment updated.
+
+- **`interpolate`**: linear interpolation between the nearest kept
+  timesteps before/after each masked run (per-candidate, clamped at horizon
+  edges via `np.interp`). Pure numpy. Falls back to `self_mean` when `B=∅`.
+  Safe for `d̂` (unlike `zero`) -- interpolates between two real continuation
+  values, can't manufacture forced termination.
+- **`candidate_swap`**: replaces candidate `i`'s masked-out timesteps with
+  candidate `j≠i`'s REAL values there (one shared random derangement drawn
+  once per `masked_Y` call and reused across `r̂`/`û`/`d̂`, so the swapped-in
+  region tells one coherent alternate candidate's story, not a per-signal
+  mix). Complements `shuffle`: `shuffle` tests whether *timing/order* within
+  a candidate's own values matters; `candidate_swap` tests whether the
+  segment's content is specific to *this* candidate at all.
+- **`retrieval`**: per-candidate nearest-neighbor lookup against the offline
+  bank `global_prior`'s mean is estimated from (L2 distance on the *kept*
+  timesteps only), filling masked steps with the closest bank member's
+  values there -- a context-sensitive alternative to `global_prior`'s single
+  population-wide constant. Requires the offline bank (raw, unaveraged
+  samples), which `experiments/build_global_prior.py` now also saves as
+  `bank.npz` (via new `masking.save_prior_bank`/`load_prior_bank`) alongside
+  the existing `prior.npz` -- no extra rollouts, the samples already exist
+  in memory when the mean is computed. Falls back to the bank mean (≈
+  `global_prior`) when `B=∅`.
+
+Re-ran `build_global_prior.py` for all 3 tasks to produce `bank.npz`
+(solo/sequential, one GPU, per §0). **Side finding: the rebuild is not
+perfectly reproducible even without concurrency** -- Crafter's re-estimated
+`prior.npz` mean differs from the original by ~0.5-1% relative (e.g.
+`r[1]`: 0.10229 → 0.10154), Walker Walk drifted by a much smaller amount
+(~0.01-0.1%), and Pong reproduced bit-for-bit exactly. This is a *different*
+phenomenon from the concurrency-induced drift already documented above (that
+one specifically requires concurrent GPU jobs; this rebuild was solo) --
+noted here, not chased further, consistent with this doc's existing stance
+on the concurrency drift's root cause.
+
+**Validation** (`sanity_check_empty_B.py` + `cross_baseline_agreement.py`,
+all 3 tasks, solo/sequential): both new fills run cleanly end-to-end, no
+crashes, on every task.
+
+- `retrieval` tracks `global_prior` almost exactly wherever checked: same
+  `D_sel`/`D_rank`/`D_margin` at `B=∅` on all 3 tasks (expected -- same
+  fallback-to-bank-mean path), and IoU=1.00 with `global_prior`'s found `B`
+  on Crafter and Walker Walk's reference points. Diverges from it on Pong's
+  reference point (IoU=0.00, each finds a different single segment) --
+  consistent with readme.md §8.2's existing finding that Pong is exactly
+  where `global_prior` and the candidate-blind fills tend to disagree.
+- `candidate_swap` is consistently the harshest fill: largest `D_margin` at
+  `B=∅` on every task (1.541 Crafter / 2.245 Pong / 1.927 Walker Walk, vs.
+  ≤1.14 for every other fill), needs the most coverage to satisfy `H_sel` on
+  Crafter (`|B|=4`, 20/30 covered, vs. `|B|=1` for self_mean/global_prior/
+  interpolate/retrieval), and is the *only* fill that finds non-trivial
+  evidence (`D_sel=1`, `|B|=1` non-empty) at Walker Walk's known-degenerate
+  reference point (seed=0/step=25, flagged degenerate under `H_sel` for
+  every other fill since 2026-07-17) -- replacing a candidate wholesale with
+  a different real candidate's trajectory is evidently a much more
+  decision-disruptive intervention than any of the statistic-based fills.
+
+Full logs: `experiments/out/<task>/`; heatmaps:
+`images/<task>/cross_baseline_agreement_v2.png`.
+
+**`interpolate`'s standalone finding** (`fill_objective_sweep.py --top-k
+1000`, 35 points/task, non-empty-`B` rate by objective):
+
+| Task | fill | sel | rank | margin |
+|---|---|---|---|---|
+| Crafter | self_mean / shuffle / zero / global_prior / **interpolate** | 57% / 51% / 66% / 80% / **60%** | 77% / 97% / 100% / 100% / **54%** | 94% / 100% / 100% / 97% / **77%** |
+| Atari Pong | same order | 31% / 74% / 31% / 94% / **31%** | 46% / 97% / 46% / 100% / **37%** | 51% / 100% / 51% / 100% / **6%** |
+| DMC Walker Walk | same order | 14% / 43% / 37% / 80% / **14%** | 37% / 94% / 60% / 100% / **23%** | 77% / 97% / 97% / 100% / **20%** |
+
+`interpolate`'s non-empty-`B` rate is consistently the lowest or
+near-lowest of all 5 fills, most strikingly on `margin` (Pong 6% vs. 51-100%
+for the others; Walker Walk 20% vs. 77-100%). Plausible reading, not fully
+chased down: local linear interpolation from real per-candidate anchors
+already looks "good enough" to `G` even from very little retained evidence,
+so greedy search has less to gain by adding more -- the opposite failure
+mode from `self_mean`'s self-leakage (readme.md §3), but likewise a form of
+the fill making `B=∅`-or-near-empty look artificially sufficient. Worth a
+`sanity_check_empty_B.py`-style flag if `interpolate` is used for real
+search results, not just `counterfactual_reimagine`-style case studies.
+
 ### Open items (updated)
 
 - ~~`counterfactual_reimagine` still hasn't been exercised by any experiment
   script~~ -- **resolved**, see above (two latent bugs fixed in `masking.py`
   along the way).
 - `H_full` still hasn't been exercised by any experiment script.
+- `candidate_swap`/`retrieval` have only been checked via `sanity_check_empty_B`/
+  `cross_baseline_agreement` (single reference point/task) -- not yet run
+  through the full 35-point `fill_objective_sweep.py` grid the other fills
+  have (`interpolate` now has this, see above).
+- `build_global_prior.py`'s solo (non-concurrent) non-determinism (this
+  section) is a new, distinct finding from the already-documented
+  concurrency-induced drift -- root cause not investigated.

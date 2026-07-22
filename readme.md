@@ -126,6 +126,9 @@ config:
 | `global_prior` | Mean of `y` computed over a large offline set of rollouts (population-level, not per-trajectory) | Recommended default. Removes self-leakage. |
 | `zero` | `fill = 0` | Only apply to `r̂`. Do **not** apply to `d̂` (see below). |
 | `shuffle` | Randomly permute the masked-out values of `y_{i,t}` among themselves (values preserved, order destroyed), or swap in same-timestep values from other candidates | Diagnostic: separates "does the *value* matter" from "does the *timing/order* matter". |
+| `interpolate` | Linear interpolation between the nearest kept timesteps before/after each masked run, per-candidate (clamped at the horizon's edges) | **Added 2026-07-20.** Pure numpy, as cheap as the other static fills. Sits between the flat static fills and `counterfactual_reimagine`: preserves local trend continuity without claiming genuine model-generated dynamics. Safe for `d̂` too (unlike `zero`) — interpolates between two real continuation values, so it can't manufacture a forced termination. Falls back to `self_mean` when `B=∅` (nothing to interpolate from). |
+| `candidate_swap` | Replace candidate `i`'s masked-out timesteps with candidate `j≠i`'s REAL values at those same timesteps (one shared random derangement across all N candidates, reused for `r̂`/`û`/`d̂` together so the swapped-in region is one coherent alternate candidate's story) | **Added 2026-07-20.** Diagnostic, complementary to `shuffle`: `shuffle` asks "does the *timing/order* of this candidate's own values matter"; this asks "is this segment specific to *this* candidate, or would another candidate's real content there work just as well". Pure numpy. Safe for `d̂` — swaps in genuinely-observed continuation values, not a forced constant. |
+| `retrieval` | For each candidate, find the offline-bank trajectory (same population `global_prior`'s mean is estimated from) whose value at the *kept* timesteps is closest (L2) to this candidate's own, and fill the masked timesteps with THAT bank member's values | **Added 2026-07-20.** A context-sensitive alternative to `global_prior`'s single population-wide constant — matched per-candidate instead of averaged away. Requires `experiments/build_global_prior.py` to have been (re-)run since 2026-07-20 to also save `bank.npz` (the raw, unaveraged samples). Falls back to the bank mean (≈ `global_prior`) when `B=∅`. |
 | `counterfactual_reimagine` | Re-run RSSM rollout for the masked region under a fixed/default action (e.g., no-op), replacing that segment's `h_{i,t}` (and downstream heads) with genuinely model-generated content | Most expensive but avoids OOD inputs to `G`; use only for small-scale case studies, not full search. |
 
 ### Special handling of `d̂` (continuation)
@@ -345,7 +348,9 @@ worldmodel_explain/
                        # seeded env + policy RNG -- see results.md 2026-07-17)
   segments.py          # builds P, defines B, indicator b_t
   masking.py            # fill strategies: self_mean, global_prior, zero, shuffle,
-                        # counterfactual; save/load_global_prior (prior.npz)
+                        # interpolate, candidate_swap, retrieval, counterfactual;
+                        # save/load_global_prior (prior.npz), save/load_prior_bank
+                        # (bank.npz, retrieval's nearest-neighbor pool)
   scoring.py             # G(·) implementation(s); explicit flag for h-dependence
   objectives.py          # D_sel, D_rank, D_margin, D_reg, R(B); H_sel/H_rank/H_margin/H_full
   search.py               # greedy forward selection (extensible)
@@ -359,11 +364,17 @@ worldmodel_explain/
     cost_accounting.py
     sample_decision_points.py              # multi-(seed,step) sweep, ranks by J range
     fill_objective_sweep.py                # fill x objective grid over N points/task
-    build_global_prior.py                  # offline precompute for masking.global_prior
+    build_global_prior.py                  # offline precompute for masking.global_prior;
+                                            # also saves bank.npz for the retrieval fill
     counterfactual_case_study.py           # exercises masking.counterfactual_reimagine on a
                                             # single fixed B (not full search, §3/§8) --
                                             # see results.md 2026-07-20
+    counterfactual_case_study_sweep.py     # same, over the standard 35-points/task grid -- how
+                                            # often does a cheap fill's B_ref re-score differently
+                                            # under counterfactual_reimagine (disagreement, not
+                                            # error -- see results.md 2026-07-20)
   priors/<task>/prior.npz    # output of build_global_prior.py, one per task
+  priors/<task>/bank.npz     # raw (unaveraged) samples, same script -- retrieval fill
   config.yaml              # generic/template config (T, D, β/α weights, fill strategy,
                             # objective variant, N candidates, decision_point seed/step)
   config_<task>.yaml         # per-task copies actually used (crafter/atari_pong/dmc_walker_walk)

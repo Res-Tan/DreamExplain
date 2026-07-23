@@ -1036,17 +1036,41 @@ crashes, on every task.
 Full logs: `experiments/out/<task>/`; heatmaps:
 `images/<task>/cross_baseline_agreement_v2.png`.
 
-**`interpolate`'s standalone finding** (`fill_objective_sweep.py --top-k
-1000`, 35 points/task, non-empty-`B` rate by objective):
+**All 7 fills' standalone finding, updated** (`fill_objective_sweep.py
+--top-k 1000`, 35 points/task, non-empty-`B` rate by objective --
+originally run with 5 fills before `candidate_swap`/`retrieval` existed,
+re-run with all 7 once both were added to `fill_objective_sweep.FILLS`):
 
 | Task | fill | sel | rank | margin |
 |---|---|---|---|---|
-| Crafter | self_mean / shuffle / zero / global_prior / **interpolate** | 57% / 51% / 66% / 80% / **60%** | 77% / 97% / 100% / 100% / **54%** | 94% / 100% / 100% / 97% / **77%** |
-| Atari Pong | same order | 31% / 74% / 31% / 94% / **31%** | 46% / 97% / 46% / 100% / **37%** | 51% / 100% / 51% / 100% / **6%** |
-| DMC Walker Walk | same order | 14% / 43% / 37% / 80% / **14%** | 37% / 94% / 60% / 100% / **23%** | 77% / 97% / 97% / 100% / **20%** |
+| Crafter | self_mean | 57% | 77% | 94% |
+| Crafter | shuffle | 60% | 94% | 100% |
+| Crafter | zero | 66% | 100% | 100% |
+| Crafter | global_prior | 80% | 100% | 97% |
+| Crafter | interpolate | 60% | 54% | 77% |
+| Crafter | **candidate_swap** | **100%** | **97%** | **100%** |
+| Crafter | **retrieval** | **80%** | **100%** | **26%** |
+| Atari Pong | self_mean | 31% | 46% | 51% |
+| Atari Pong | shuffle | 74% | 97% | 100% |
+| Atari Pong | zero | 31% | 46% | 51% |
+| Atari Pong | global_prior | 94% | 100% | 100% |
+| Atari Pong | interpolate | 31% | 37% | 6% |
+| Atari Pong | **candidate_swap** | **97%** | **100%** | **100%** |
+| Atari Pong | **retrieval** | **94%** | **100%** | **100%** |
+| DMC Walker Walk | self_mean | 14% | 37% | 77% |
+| DMC Walker Walk | shuffle | 51% | 83% | 100% |
+| DMC Walker Walk | zero | 37% | 60% | 97% |
+| DMC Walker Walk | global_prior | 80% | 100% | 100% |
+| DMC Walker Walk | interpolate | 14% | 23% | 20% |
+| DMC Walker Walk | **candidate_swap** | **100%** | **100%** | **100%** |
+| DMC Walker Walk | **retrieval** | **80%** | **100%** | **94%** |
+
+(`shuffle`'s numbers move a few points between re-runs, same unseeded-RNG
+caveat as 2026-07-17; small shifts vs. the single-point checks above are
+this, not a bug.)
 
 `interpolate`'s non-empty-`B` rate is consistently the lowest or
-near-lowest of all 5 fills, most strikingly on `margin` (Pong 6% vs. 51-100%
+near-lowest of all 7 fills, most strikingly on `margin` (Pong 6% vs. 51-100%
 for the others; Walker Walk 20% vs. 77-100%). Plausible reading, not fully
 chased down: local linear interpolation from real per-candidate anchors
 already looks "good enough" to `G` even from very little retained evidence,
@@ -1056,16 +1080,36 @@ the fill making `B=∅`-or-near-empty look artificially sufficient. Worth a
 `sanity_check_empty_B.py`-style flag if `interpolate` is used for real
 search results, not just `counterfactual_reimagine`-style case studies.
 
+**`candidate_swap` needs by far the most coverage of any fill, on every task
+and every objective** (97-100% non-empty across the board) -- confirms the
+single-point finding above (harshest `D_margin` at `B=∅`) now backed by 35
+points/task: replacing a candidate with a different real candidate's
+trajectory destroys decision structure so thoroughly that search almost
+always has to retain something to compensate, regardless of task or
+objective.
+
+**`retrieval` tracks `global_prior` closely on `sel`/`rank` on every task
+(identical or within a few points), but its `margin` rate diverges sharply
+on Crafter specifically** (26% vs. `global_prior`'s 97% -- a 71-point gap,
+while Pong and Walker Walk's `retrieval`/`global_prior` `margin` rates are
+close, 100/100 and 94/100 respectively). Not chased down further -- flagged
+here as a fill-specific, task-specific oddity rather than explained, since
+it's the one cell that breaks an otherwise consistent "retrieval ≈
+global_prior" pattern across all other (task, objective) combinations.
+
 ### Open items (updated)
 
 - ~~`counterfactual_reimagine` still hasn't been exercised by any experiment
   script~~ -- **resolved**, see above (two latent bugs fixed in `masking.py`
   along the way).
 - `H_full` still hasn't been exercised by any experiment script.
-- `candidate_swap`/`retrieval` have only been checked via `sanity_check_empty_B`/
-  `cross_baseline_agreement` (single reference point/task) -- not yet run
-  through the full 35-point `fill_objective_sweep.py` grid the other fills
-  have (`interpolate` now has this, see above).
+- ~~`candidate_swap`/`retrieval` have only been checked via
+  `sanity_check_empty_B`/`cross_baseline_agreement` (single reference
+  point/task)~~ -- **resolved**, see the updated 7-fill table above (all 3
+  tasks, 35 points/task).
+- `retrieval`'s Crafter-specific `margin` divergence from `global_prior`
+  (26% vs. 97%, this section) isn't explained -- the one cell that breaks an
+  otherwise consistent "retrieval ≈ global_prior" pattern.
 - `build_global_prior.py`'s solo (non-concurrent) non-determinism (this
   section) is a new, distinct finding from the already-documented
   concurrency-induced drift -- root cause not investigated.

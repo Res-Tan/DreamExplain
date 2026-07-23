@@ -1097,6 +1097,70 @@ here as a fill-specific, task-specific oddity rather than explained, since
 it's the one cell that breaks an otherwise consistent "retrieval ≈
 global_prior" pattern across all other (task, objective) combinations.
 
+### `candidate_swap`/`retrieval`: coverage-bucket distribution + single-point case studies
+
+Follow-up to the 7-fill non-empty-`B`-rate table above -- that table only
+says *whether* search added anything, not the resulting `D` value or how
+coverage is actually distributed across points. Ran
+`experiments/regularizer_grid_sweep.py --fills candidate_swap,retrieval` (35
+points/task, all 3 objectives, the same 10-multiplier grid and
+`COV_BINS = (0,5,10,15,20,25,31)` bucketing used for the original 4 fills on
+2026-07-17) plus one `cross_objective_agreement.py` case study per fill per
+task (reuses the existing script/reference points unchanged, just with
+`--fill candidate_swap` / `--fill retrieval`).
+
+**`retrieval` + `H_sel`: a strong, consistent finding across all 3
+tasks.** At baseline-to-moderate regularizer strength, mean `D_sel` is
+**exactly 0.000** on every task (only drifting off zero once the multiplier
+gets aggressive enough to start cutting useful segments -- ×15 on Crafter,
+×9 on Walker Walk, not until ×20 on Pong), while mean coverage stays tiny
+(1.1-2.7/30) and almost every point lands in the 0-4 bucket. `retrieval`
+essentially always finds a small, fully decision-preserving explanation
+under `H_sel` -- a stronger property than any of the other 6 fills
+demonstrate at this objective (compare the 7-fill table's `sel` column,
+where even `global_prior` only reaches 80-94% *non-empty*, not "always fully
+correct").
+
+**`candidate_swap` + `H_sel`: the opposite pattern, and worse on Pong than
+the other two tasks.** Mean `D_sel` never approaches 0 on any task even at
+the highest multipliers tested (before search gives up entirely and
+collapses to `B=∅` at ×20) -- Crafter 0.43-0.66, Walker Walk 0.43-0.74, and
+Pong notably worse at 0.71-0.91 with coverage that stays small throughout
+(~2-3/30, never grows past that even at ×1). This is a different failure
+mode from "needs more coverage" (the 7-fill table's near-100% non-empty
+rate): even with real segments retained, replacing the rest with a
+*different real candidate's* trajectory apparently changes the imagined
+argmax often enough that `H_sel` frequently can't be satisfied at all on
+this checkpoint set, worst on Pong specifically.
+
+**`margin`'s bimodal-vs-spread split by task (2026-07-17's finding) also
+holds for both new fills, not just the original four.** Crafter's `margin`
+coverage distributions stay comparatively spread across buckets at every
+multiplier for both fills; Pong and Walker Walk's both show real mass at
+*both* extremes (0-4 and 25-30) simultaneously, e.g. `candidate_swap`
+margin ×1: Pong `8/6/4/3/1/13`, Walker Walk `3/8/5/3/0/16` -- consistent with
+the task being the driver of bimodal-vs-spread `H_margin` behavior, not the
+choice of fill.
+
+**Single-point case studies** (`images/<task>/cross_objective_agreement_{candidate_swap,retrieval}.png`):
+
+| Task | `candidate_swap` (`B_rank` / `B_margin`) | `retrieval` (`B_rank` / `B_margin`) |
+|---|---|---|
+| Crafter | `[(15,22),(22,22)]` / 5 segments, near-full horizon | `[(13,20),(10,13)]` / `[(9,16),(5,8),(17,18),(23,23)]` |
+| Atari Pong | `[(28,29),(15,18)]` / 6 segments spanning most of horizon | `[(0,0)]` / `[(8,15),(29,29),(7,7)]` |
+| DMC Walker Walk | `[(22,29),(17,24),(10,17),(2,9),(0,1)]` / 6 segments, `B_rank`≡`B_margin` (IoU=1.00) | `[(22,29)]` / `[(17,18)]` |
+
+Walker Walk's case study point is the *same* reference point flagged
+degenerate under `H_sel` for every other fill since 2026-07-17
+(seed=0/step=25) -- `candidate_swap` is not degenerate there at all
+(`B_rank`/`B_margin` both cover almost the entire 30-step horizon, and are
+identical to each other), reinforcing the 7-fill table's finding that it's
+the only fill non-empty at this specific point. `retrieval` stays compact
+even here (`[(22,29)]`, `[(17,18)]`), consistent with its `sel`-objective
+efficiency generalizing to not needing large explanations elsewhere either.
+
+Full logs: `experiments/out/<task>/regularizer_grid_swap_retrieval.log`.
+
 ### Open items (updated)
 
 - ~~`counterfactual_reimagine` still hasn't been exercised by any experiment
@@ -1106,10 +1170,14 @@ global_prior" pattern across all other (task, objective) combinations.
 - ~~`candidate_swap`/`retrieval` have only been checked via
   `sanity_check_empty_B`/`cross_baseline_agreement` (single reference
   point/task)~~ -- **resolved**, see the updated 7-fill table above (all 3
-  tasks, 35 points/task).
+  tasks, 35 points/task) and the coverage-bucket distribution + case study
+  section above.
 - `retrieval`'s Crafter-specific `margin` divergence from `global_prior`
   (26% vs. 97%, this section) isn't explained -- the one cell that breaks an
   otherwise consistent "retrieval ≈ global_prior" pattern.
+- `candidate_swap`'s `H_sel` failure being notably worse on Pong specifically
+  (mean `D_sel` 0.71-0.91 vs. 0.43-0.74 on the other two tasks) isn't
+  explained -- flagged, not chased down.
 - `build_global_prior.py`'s solo (non-concurrent) non-determinism (this
   section) is a new, distinct finding from the already-documented
   concurrency-induced drift -- root cause not investigated.

@@ -1161,6 +1161,60 @@ efficiency generalizing to not needing large explanations elsewhere either.
 
 Full logs: `experiments/out/<task>/regularizer_grid_swap_retrieval.log`.
 
+### Segment *length* distribution: which of D={1,2,4,8} does each fill actually pick?
+
+Coverage (regularizer_grid_sweep.py) and |B| (fill_objective_sweep.py) both
+say how *much* of the horizon ends up retained, but not what *shape* it
+takes -- two B's can have identical coverage or segment count while being
+built from entirely different mixes of the 4 candidate durations
+(readme.md §2, D={1,2,4,8}). Added `experiments/segment_length_distribution.py`:
+pools every individual segment greedy search adds into B across the
+standard 35-point/task grid (baseline ×1 regularizer weights) and
+histograms by duration, for `global_prior` (reference) plus the two new
+fills, all 3 objectives.
+
+**Dominant duration per (task, fill, objective)** (i.e. which of d=1/2/4/8
+has the most segments; see `experiments/out/<task>/segment_length_distribution.log`
+for the full 4-way breakdown in every cell):
+
+| Task | fill | sel | rank | margin |
+|---|---|---|---|---|
+| Crafter | global_prior | d=8 (33%) | d=8 (47%) | d=8 (52%) |
+| Crafter | candidate_swap | d=8 (52%) | d=8 (50%) | d=8 (38%) |
+| Crafter | **retrieval** | **d=1 (43%)** | **d=1 (34%)** | d=8 (33%, near-uniform) |
+| Atari Pong | global_prior | d=1 (91%) | d=1 (80%) | d=8 (86%) |
+| Atari Pong | candidate_swap | d=1 (43%, mixed) | d=8 (46%) | d=8 (49%) |
+| Atari Pong | **retrieval** | **d=1 (91%)** | d=1 (62%) | **d=8 (27%, ~uniform)** |
+| DMC Walker Walk | global_prior | d=2 (35%) | d=8 (38%) | d=8 (77%) |
+| DMC Walker Walk | **candidate_swap** | **d=8 (66%)** | **d=8 (65%)** | **d=8 (61%)** |
+| DMC Walker Walk | retrieval | d=1 (43%) | d=8 (36%) | d=8 (51%) |
+
+**`retrieval` leans toward short (d=1/2) segments more than the other two
+fills, most clearly under `H_sel`**: 43% (Crafter), 91% (Pong -- but
+`global_prior` matches exactly here too, both candidate-independent-ish on
+Pong's near-zero reward), 43% (Walker Walk) of its `sel` segments are
+single-timestep, vs. `global_prior`/`candidate_swap` which lean d=8 on
+Crafter and Walker Walk. Combined with the earlier finding that `retrieval`
+already achieves `D_sel=0.000` with barely any coverage, this sharpens that
+picture: it isn't just "efficient," the evidence it does retain tends to be
+localized single-timestep anchors rather than sustained multi-step blocks.
+
+**`candidate_swap` on Walker Walk specifically prefers long (d=8) segments
+across *all three* objectives** (66%/65%/61%), unlike its more
+objective-dependent profile on Crafter/Pong -- a task-specific pattern, not
+a general property of the fill (compare Pong's `candidate_swap`/`sel`,
+which is a genuinely mixed 43/29/14/14 split, not d=8-dominated at all).
+
+**`margin` converges toward d=8 almost everywhere, confirming H_margin's
+already-documented preference for large `B` (2026-07-17) manifests as
+literally longer individual segments, not just more of them** -- 7/9 of the
+`margin` rows above are d=8-dominant, often overwhelmingly (Pong
+`global_prior` 86%, Walker Walk `global_prior` 77%). The two exceptions are
+both `retrieval`: Crafter's margin durations are nearly uniform
+(22/22/22/33%) and Pong's margin is close to uniform too (27/21/20/27%) --
+`retrieval` is the only one of the 3 fills checked here whose `margin`
+explanations don't collapse toward long blocks.
+
 ### Open items (updated)
 
 - ~~`counterfactual_reimagine` still hasn't been exercised by any experiment
@@ -1178,6 +1232,11 @@ Full logs: `experiments/out/<task>/regularizer_grid_swap_retrieval.log`.
 - `candidate_swap`'s `H_sel` failure being notably worse on Pong specifically
   (mean `D_sel` 0.71-0.91 vs. 0.43-0.74 on the other two tasks) isn't
   explained -- flagged, not chased down.
+- ~~Segment length (D={1,2,4,8}) distribution per fill was never reported,
+  only coverage/|B|~~ -- **resolved**, see "Segment *length* distribution"
+  above (`global_prior`/`candidate_swap`/`retrieval` only; `self_mean`/
+  `shuffle`/`zero`/`interpolate` not yet run through
+  `segment_length_distribution.py`).
 - `build_global_prior.py`'s solo (non-concurrent) non-determinism (this
   section) is a new, distinct finding from the already-documented
   concurrency-induced drift -- root cause not investigated.

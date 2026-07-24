@@ -373,6 +373,9 @@ worldmodel_explain/
                                             # often does a cheap fill's B_ref re-score differently
                                             # under counterfactual_reimagine (disagreement, not
                                             # error -- see results.md 2026-07-20)
+    segment_length_distribution.py         # histograms search's chosen segments by duration
+                                            # (D={1,2,4,8}) per fill/objective, 35 points/task --
+                                            # see results.md 2026-07-20
   priors/<task>/prior.npz    # output of build_global_prior.py, one per task
   priors/<task>/bank.npz     # raw (unaveraged) samples, same script -- retrieval fill
   config.yaml              # generic/template config (T, D, β/α weights, fill strategy,
